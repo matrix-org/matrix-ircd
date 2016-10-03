@@ -1,0 +1,30 @@
+[package]
+authors = ["Erik Johnston <erikj@matrix.org>"]
+name = "irc-matrix-bridge"
+version = "0.1.0"
+
+[dependencies]
+curl = "0.3.7"
+futures = "0.1.1"
+lazy_static = "0.2.1"
+pest = "0.4.0"
+serde = "0.8.10"
+serde_derive = "0.8.10"
+serde_json = "0.8.2"
+slog-term = "1.1.0"
+tokio-core = "0.1.0"
+tokio-curl = "0.1.0"
+url = "1.2.1"
+
+[dependencies.slog]
+features = ["max_level_trace", "release_max_level_warn"]
+version = "1.0.0"
+
+[dependencies.tokio-proto]
+git = "https://github.com/tokio-rs/tokio-proto"
+
+[dependencies.tokio-tls]
+git = "https://github.com/tokio-rs/tokio-tls"
+
+[dependencies.tokio-timer]
+git = "https://github.com/tokio-rs/tokio-timer"

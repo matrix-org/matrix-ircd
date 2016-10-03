@@ -1,0 +1,8 @@
+write_mode = "Overwrite"
+fn_arg_indent = "Tabbed"
+fn_args_layout = "Block"
+where_pred_indent = "Visual"
+where_indent = "Visual"
+fn_return_indent = "WithWhereClause"
+reorder_imports = true
+reorder_imported_names = true
