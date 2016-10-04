@@ -6,8 +6,10 @@ version = "0.1.0"
 [dependencies]
 curl = "0.3.7"
 futures = "0.1.1"
+itertools = "0.5.1"
 lazy_static = "0.2.1"
 pest = "0.4.0"
+quick-error = "1.1.0"
 serde = "0.8.10"
 serde_derive = "0.8.10"
 serde_json = "0.8.2"
@@ -23,8 +25,8 @@ version = "1.0.0"
 [dependencies.tokio-proto]
 git = "https://github.com/tokio-rs/tokio-proto"
 
-[dependencies.tokio-tls]
-git = "https://github.com/tokio-rs/tokio-tls"
-
 [dependencies.tokio-timer]
 git = "https://github.com/tokio-rs/tokio-timer"
+
+[dependencies.tokio-tls]
+git = "https://github.com/tokio-rs/tokio-tls"

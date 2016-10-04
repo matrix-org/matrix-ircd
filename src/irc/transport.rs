@@ -6,7 +6,7 @@ use futures::stream::Stream;
 use std::io::{self, Cursor};
 use std::sync::{Arc, Mutex};
 
-use super::protocol::IrcLine;
+use super::protocol::IrcCommand;
 
 use tokio_core::io::Io;
 
@@ -35,29 +35,33 @@ impl<S: Io> IrcServerConnection<S> {
     }
 
     pub fn write_line(&mut self, line: &str) {
-        let mut inner = self.inner.lock().unwrap();
-
-        task_trace!("Writting line"; "line" => line);
-
         {
-            let mut v = inner.write_buffer.get_mut();
-            v.extend_from_slice(line.as_bytes());
-            v.push(b'\n');
-        }
+            let mut inner = self.inner.lock().unwrap();
 
-        if let Some(ref t) = inner.write_notify {
-            t.unpark();
+            trace!(self.ctx.logger, "Writting line"; "line" => line);
+
+            {
+                let mut v = inner.write_buffer.get_mut();
+                v.extend_from_slice(line.as_bytes());
+                v.push(b'\n');
+            }
+
+            if let Some(ref t) = inner.write_notify {
+                t.unpark();
+            }
         }
+        self.poll_write().ok();
     }
 
-    fn poll_read(&mut self) -> Poll<IrcLine, io::Error> {
+    fn poll_read(&mut self) -> Poll<IrcCommand, io::Error> {
         loop {
-            if let Some(pos) = self.read_buffer.iter().position(|&c| c == b'\n') {
+            while let Some(pos) = self.read_buffer.iter().position(|&c| c == b'\n') {
                 let to_return = self.read_buffer.drain(..pos + 1).collect();
                 match String::from_utf8(to_return) {
                     Ok(line) => {
                         let line = line.trim_right().to_string();
                         if let Ok(irc_line) = line.parse() {
+                            trace!(self.ctx.logger, "Got IRC line"; "line" => line);
                             return Ok(Async::Ready(irc_line));
                         } else {
                             warn!(self.ctx.logger, "Invalid IRC line"; "line" => line);
@@ -127,10 +131,10 @@ impl<S: Io> IrcServerConnection<S> {
 }
 
 impl<S: Io> Stream for IrcServerConnection<S> {
-    type Item = IrcLine;
+    type Item = IrcCommand;
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<Option<IrcLine>, io::Error> {
+    fn poll(&mut self) -> Poll<Option<IrcCommand>, io::Error> {
         trace!(self.ctx.logger, "IRC Polled");
 
         if self.closed {

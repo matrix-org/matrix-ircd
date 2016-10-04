@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
+extern crate serde;
 #[macro_use]
 extern crate futures;
 #[macro_use]
@@ -18,6 +19,10 @@ extern crate url;
 extern crate lazy_static;
 #[macro_use]
 extern crate pest;
+#[macro_use]
+extern crate quick_error;
+extern crate itertools;
+
 
 use futures::Future;
 use futures::stream::Stream;
@@ -122,18 +127,17 @@ fn main() {
 
     info!(log, "Started listening"; "addr" => addr_str);
 
-    let access_token = String::from("MDAxY2xvY2F0aW9uIGxvY2FsaG9zdDo4NDgwCjAwMTNpZGVudGlmaWVyIGtleQowMDEwY2lkIGdlbiA9IDEKMDAyN2NpZCB1c2VyX2lkID0gQHRlc3Q6bG9jYWxob3N0Ojg0ODAKMDAxNmNpZCB0eXBlID0gYWNjZXNzCjAwMWRjaWQgdGltZSA8IDE0NzU1NzQ4MTA4OTMKMDAyZnNpZ25hdHVyZSBoN-vbJfT8QG1DPOq4YlWO3kpd0k-upt2kKtcqO5-qGwo");
-
     let done = socket.incoming().for_each(move |(socket, addr)| {
         let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
         let new_handle = handle.clone();
-        let access_token = access_token.clone();
+
+        // We wrap the code in a lazy future so that its run in the new task.
         handle.spawn(futures::lazy(move || {
             debug!(peer_log, "Accepted connection");
 
             let ctx = ConnectionContext {
-                logger: peer_log,
+                logger: peer_log.clone(),
                 peer_addr: addr,
             };
 
@@ -142,12 +146,16 @@ fn main() {
             });
 
             let url = url::Url::parse("http://localhost:8080/").unwrap();
-            let client = matrix::MatrixClient::new(new_handle, &url, access_token);
-            let bridge = bridge::Bridge::new(socket, ctx, client);
 
-            bridge.map_err(|e| {
-                panic!("error: {}", e);
+            let irc_server_name = "localhost".into();
+
+            bridge::Bridge::create(new_handle, url, socket, irc_server_name, ctx)
+            .and_then(|bridge| {
+                bridge
+            }).map_err(move |err| {
+                warn!(peer_log, "Unhandled IO error"; "error" => format!("{}", err));
             })
+
         }));
 
         Ok(())

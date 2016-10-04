@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use serde_json;
+
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncResponse {
     pub next_batch: String,
@@ -37,13 +40,24 @@ pub struct Event {
     #[serde(rename = "type")]
     pub etype: String,
     pub state_key: Option<String>,
-    pub content: EventContent,
+    pub content: serde_json::Value,
+}
+
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LoginPasswordInput {
+    pub user: String,
+    pub password: String,
+    #[serde(rename = "type")]
+    pub login_type: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct EventContent {
-    pub msgtype: Option<String>,
-    pub body: Option<String>,
+pub struct LoginResponse {
+    pub access_token: String,
+    pub device_id: String,
+    pub home_server: String,
+    pub user_id: String,
 }
 
 
