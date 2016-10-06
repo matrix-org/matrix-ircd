@@ -1,4 +1,6 @@
-#![allow(block_in_if_condition_stmt)]  // impl_rdp! uses this
+#![cfg_attr(feature = "clippy", allow(block_in_if_condition_stmt))]  // impl_rdp! uses this
+
+
 
 use slog::{Record, Serialize, Serializer};
 use slog::ser::Error as SlogSerError;
@@ -16,7 +18,7 @@ pub enum IrcCommand {
     Part { channel: String },
     Quit,
     Ping { data: String },
-    Mode,
+    Mode { target: String, mask: Option<String> },
     Pong { data: String },
     Pass { password: String },
     PrivMsg { channel: String, text: String },
@@ -51,7 +53,17 @@ impl IrcCommand {
             Command::Ping => {
                 irc_line.args.into_iter().next().map(|arg| IrcCommand::Ping { data: arg })
             }
-            Command::Mode => Some(IrcCommand::Mode),
+            Command::Mode => {
+                let mut it = irc_line.args.into_iter();
+                if let Some(target) = it.next() {
+                    Some(IrcCommand::Mode {
+                        target: target,
+                        mask: it.next(),
+                    })
+                } else {
+                    None
+                }
+            }
             Command::Pong => {
                 irc_line.args.into_iter().next().map(|arg| IrcCommand::Pong { data: arg })
             }
@@ -96,7 +108,7 @@ impl IrcCommand {
             IrcCommand::Part { .. } => Command::Part,
             IrcCommand::Quit => Command::Quit,
             IrcCommand::Ping { .. } => Command::Ping,
-            IrcCommand::Mode => Command::Mode,
+            IrcCommand::Mode { .. } => Command::Mode,
             IrcCommand::Pong { .. } => Command::Pong,
             IrcCommand::Pass { .. } => Command::Pass,
             IrcCommand::PrivMsg { .. } => Command::PrivMsg,
@@ -300,17 +312,18 @@ pub fn parse_irc_line(line: &str) -> Option<IrcLine> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Numeric {
-    RPL_WELCOME = 1,
-    RPL_TOPIC = 332,
-    RPL_ENDOFWHO = 315,
-    RPL_WHOREPLY = 352,
-    RPL_NAMREPLY = 353,
-    RPL_ENDOFNAMES = 366,
-    RPL_MOTD = 372,
-    RPL_MOTDSTART = 375,
-    RPL_ENDOFMOTD = 376,
-    ERR_NEEDMOREPARAMS = 461,
-    ERR_PASSWDMISMATCH = 464,
+    RplWelcome = 1,
+    RplChannelmodeis = 324,
+    RplTopic = 332,
+    RplEndofwho = 315,
+    RplWhoreply = 352,
+    RplNamreply = 353,
+    RplEndofnames = 366,
+    RplMotd = 372,
+    RplMotdstart = 375,
+    RplEndofmotd = 376,
+    ErrNeedmoreparams = 461,
+    ErrPasswdmismatch = 464,
 }
 
 impl Numeric {
@@ -322,17 +335,18 @@ impl Numeric {
 impl<'a> From<Numeric> for &'a str {
     fn from(s: Numeric) -> &'a str {
         match s {
-            Numeric::RPL_WELCOME => "001",
-            Numeric::RPL_TOPIC => "332",
-            Numeric::RPL_ENDOFWHO => "315",
-            Numeric::RPL_WHOREPLY => "352",
-            Numeric::RPL_NAMREPLY => "353",
-            Numeric::RPL_ENDOFNAMES => "366",
-            Numeric::RPL_MOTD => "372",
-            Numeric::RPL_MOTDSTART => "375",
-            Numeric::RPL_ENDOFMOTD => "376",
-            Numeric::ERR_NEEDMOREPARAMS => "461",
-            Numeric::ERR_PASSWDMISMATCH => "464",
+            Numeric::RplWelcome => "001",
+            Numeric::RplChannelmodeis => "324",
+            Numeric::RplTopic => "332",
+            Numeric::RplEndofwho => "315",
+            Numeric::RplWhoreply => "352",
+            Numeric::RplNamreply => "353",
+            Numeric::RplEndofnames => "366",
+            Numeric::RplMotd => "372",
+            Numeric::RplMotdstart => "375",
+            Numeric::RplEndofmotd => "376",
+            Numeric::ErrNeedmoreparams => "461",
+            Numeric::ErrPasswdmismatch => "464",
         }
     }
 }

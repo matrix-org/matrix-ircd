@@ -5,8 +5,9 @@ use futures::stream::Stream;
 
 use std::io::{self, Cursor};
 use std::sync::{Arc, Mutex};
+use std::fmt::Write;
 
-use super::protocol::IrcCommand;
+use super::protocol::{Numeric, IrcCommand};
 
 use tokio_core::io::Io;
 
@@ -17,21 +18,19 @@ pub struct IrcServerConnection<S: Io> {
     inner: Arc<Mutex<IrcServerConnectionInner>>,
     closed: bool,
     ctx: ConnectionContext,
+    server_name: String,
 }
 
 impl<S: Io> IrcServerConnection<S> {
-    pub fn new(conn: S, context: ConnectionContext) -> IrcServerConnection<S> {
+    pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
             conn: conn,
             read_buffer: Vec::with_capacity(1024),
             inner: Arc::new(Mutex::new(IrcServerConnectionInner::new())),
             closed: false,
             ctx: context,
+            server_name: server_name,
         }
-    }
-
-    pub fn get_handle(&self) -> IrcServerConnectionHandle {
-        IrcServerConnectionHandle { inner: self.inner.clone() }
     }
 
     pub fn write_line(&mut self, line: &str) {
@@ -51,6 +50,51 @@ impl<S: Io> IrcServerConnection<S> {
             }
         }
         self.poll_write().ok();
+    }
+
+    pub fn write_invalid_password(&mut self, nick: &str) {
+        self.write_numeric(Numeric::ErrPasswdmismatch, nick, ":Invalid password");
+    }
+
+    pub fn write_password_required(&mut self, nick: &str) {
+        self.write_numeric(Numeric::ErrNeedmoreparams, nick, "PASS :Password required");
+    }
+
+    pub fn write_numeric(&mut self, numeric: Numeric, nick: &str, rest_of_line: &str) {
+        let line = format!(":{} {} {} {}", &self.server_name, numeric.as_str(), nick, rest_of_line);
+        self.write_line(&line);
+    }
+
+    pub fn welcome(&mut self, nick: &str) {
+        self.write_numeric(Numeric::RplWelcome, nick, ":Welcome to the Matrix Internet Relay Network");
+
+        let motd_start = format!(":- {} Message of the day -", self.server_name);
+        self.write_numeric(Numeric::RplMotdstart, nick, &motd_start);
+        self.write_numeric(Numeric::RplMotd, nick, ":-");
+        self.write_numeric(Numeric::RplMotd, nick, ":- This is a bridge into Matrix");
+        self.write_numeric(Numeric::RplMotd, nick, ":-");
+        self.write_numeric(Numeric::RplEndofmotd, nick, ":End of MOTD");
+    }
+
+    pub fn write_join(&mut self, nick: &str, channel: &str) {
+        let line = format!(":{} JOIN {}", nick, channel);
+        self.write_line(&line);
+    }
+
+    pub fn write_topic(&mut self, nick: &str, channel: &str, topic: &str) {
+        self.write_numeric(Numeric::RplTopic, nick, &format!("{} :{}", channel, topic));
+    }
+
+    pub fn write_names(&mut self, nick: &str, channel: &str, names: &[(&String, bool)]) {
+        for iter in names.chunks(10) {
+            let mut line = format!("@ {} :", channel);
+            for &(nick, op) in iter {
+                write!(line, "{}{} ", if op {"@"} else {""}, &nick).unwrap();
+            }
+            line.trim();
+            self.write_numeric(Numeric::RplNamreply, nick, &line);
+        }
+        self.write_numeric(Numeric::RplEndofnames, nick, &format!("{} :End of /NAMES", channel));
     }
 
     fn poll_read(&mut self) -> Poll<IrcCommand, io::Error> {
@@ -167,30 +211,6 @@ impl IrcServerConnectionInner {
         IrcServerConnectionInner {
             write_buffer: Cursor::new(Vec::with_capacity(1024)),
             write_notify: None,
-        }
-    }
-}
-
-
-#[derive(Debug, Clone)]
-pub struct IrcServerConnectionHandle {
-    inner: Arc<Mutex<IrcServerConnectionInner>>,
-}
-
-impl IrcServerConnectionHandle {
-    pub fn write_line(&mut self, line: &str) {
-        let mut inner = self.inner.lock().unwrap();
-
-        task_trace!("Writting line"; "line" => line);
-
-        {
-            let mut v = inner.write_buffer.get_mut();
-            v.extend_from_slice(line.as_bytes());
-            v.push(b'\n');
-        }
-
-        if let Some(ref t) = inner.write_notify {
-            t.unpark();
         }
     }
 }

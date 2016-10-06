@@ -3,19 +3,20 @@ use ConnectionContext;
 use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
-use irc::{IrcCommand, IrcUserConnection, Numeric};
+use irc::{IrcCommand, IrcUserConnection};
 
 use matrix::{LoginError, MatrixClient};
-use matrix::models::{SyncResponse, JoinedRoomSyncResponse};
+use matrix::protocol::{SyncResponse, JoinedRoomSyncResponse};
+use matrix::Room as MatrixRoom;
 
 use std::io;
 use std::collections::BTreeMap;
 
+use serde_json::Value;
+
 use tokio_core::io::Io;
 use tokio_core::reactor::Handle;
 use url::Url;
-
-mod room;
 
 
 pub struct Bridge<IS: Io> {
@@ -23,8 +24,9 @@ pub struct Bridge<IS: Io> {
     matrix_client: MatrixClient,
     ctx: ConnectionContext,
     closed: bool,
-    rooms: BTreeMap<String, room::Room>,
-    channel_to_room_id: BTreeMap<String, String>,
+    mappings: MappingStore,
+    handle: Handle,
+    is_first_sync: bool,
 }
 
 impl<IS: Io> Bridge<IS> {
@@ -32,7 +34,7 @@ impl<IS: Io> Bridge<IS> {
         IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
         .and_then(move |mut user_connection| {
             MatrixClient::login(
-                handle, base_url, user_connection.user.clone(), user_connection.password.clone()
+                handle.clone(), base_url, user_connection.user.clone(), user_connection.password.clone()
             ).then(move |res| {
                 match res {
                     Ok(matrix_client) => Ok(Bridge {
@@ -40,8 +42,9 @@ impl<IS: Io> Bridge<IS> {
                         matrix_client: matrix_client,
                         ctx: ctx,
                         closed: false,
-                        rooms: BTreeMap::new(),
-                        channel_to_room_id: BTreeMap::new(),
+                        mappings: MappingStore::default(),
+                        handle: handle,
+                        is_first_sync: true
                     }),
                     Err(LoginError::InvalidPassword) => {
                         user_connection.write_invalid_password();
@@ -52,7 +55,12 @@ impl<IS: Io> Bridge<IS> {
             })
         })
         .and_then(|mut bridge| {
-            bridge.irc_conn.welcome();
+            {
+                let Bridge { ref mut mappings, ref mut irc_conn, ref matrix_client, .. } = bridge;
+                let own_nick = irc_conn.nick.clone();
+                let own_user_id = matrix_client.get_user_id().into();
+                mappings.insert_nick(irc_conn, own_nick, own_user_id);
+            }
             Ok(bridge)
         })
     }
@@ -61,27 +69,35 @@ impl<IS: Io> Bridge<IS> {
         debug!(self.ctx.logger, "Received IRC line"; "command" => line.command());
 
         match line {
-            IrcCommand::Join { channel } => {
-                let Bridge { ref channel_to_room_id, ref rooms, ref mut irc_conn, .. } = *self;
-                if let Some(room_id) = channel_to_room_id.get(&channel) {
-                    let room = rooms.get(room_id).expect("channel to room_id is incorrect");
-                    irc_conn.write_join(&room.irc_name);
-                    irc_conn.write_topic(&room.irc_name, "TEST TOPIC");
-                    irc_conn.write_names(&room.irc_name, &["test".into()]);
+            IrcCommand::PrivMsg { channel, text } => {
+                if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
+                    let logger = self.ctx.logger.clone();
+                    self.handle.spawn(
+                        self.matrix_client.send_text_message(room_id, text)
+                        .map(|_| ()).map_err(move |_| warn!(logger, "Failed to send"))
+                    );
+                } else {
+                    warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }
             }
-            IrcCommand::Who{ matches } => {
-                if matches.starts_with('#') {
-                    self.handle_who_channel_cmd(matches);
-                }
+            // TODO: Handle JOIN
+            // TODO: Handle PART
+            c => {
+                warn!(self.ctx.logger, "Ignoring IRC command"; "command" => c.command());
             }
-            _ => {}
         }
     }
 
     fn handle_sync_response(&mut self, sync_response: SyncResponse) {
         trace!(self.ctx.logger, "Received sync response"; "batch" => sync_response.next_batch);
-        // self.irc_conn.write_line(&format!("Batch: {}", sync_response.next_batch));
+
+        if self.is_first_sync {
+            info!(self.ctx.logger, "Received initial sync response");
+
+            self.is_first_sync = false;
+            self.irc_conn.welcome();
+            self.irc_conn.send_ping("HELLO");
+        }
 
         for (room_id, sync) in &sync_response.rooms.join {
             self.handle_room_sync(room_id, sync);
@@ -89,34 +105,37 @@ impl<IS: Io> Bridge<IS> {
     }
 
     fn handle_room_sync(&mut self, room_id: &str, sync: &JoinedRoomSyncResponse) {
-        if !self.rooms.contains_key(room_id) {
-            let room = room::Room::from_sync(room_id.into(), sync);
-            self.channel_to_room_id.insert(room.irc_name.clone(), room_id.into());
-            self.send_join_irc_result(&room);
-            self.rooms.insert(room_id.to_string(), room);
-        }
-    }
+        let (channel, new) = if let Some(room) = self.matrix_client.get_room(room_id) {
+            self.mappings.create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)
+        } else {
+            warn!(self.ctx.logger, "Got room matrix doesn't know about"; "room_id" => room_id);
+            return;
+        };
 
-    fn send_join_irc_result(&mut self, room: &room::Room) {
-        self.irc_conn.write_join(&room.irc_name);
-        self.irc_conn.write_topic(&room.irc_name, "TEST TOPIC");
-        self.irc_conn.write_names(&room.irc_name, &["test".into()]);
-    }
-
-
-    fn handle_who_channel_cmd(&mut self, channel: String) {
-        let Bridge { ref channel_to_room_id, ref rooms, ref mut irc_conn, .. } = *self;
-
-        if let Some(room_id) = channel_to_room_id.get(&channel) {
-            let room = rooms.get(room_id).expect("channel to room_id is incorrect");
-
-            irc_conn.write_numeric(Numeric::RPL_WHOREPLY, &format!("{} test cloak host test H :0 Test", &channel));
+        for ev in &sync.timeline.events {
+            if ev.etype == "m.room.message" {
+                if let Some(body) = ev.content.find("body").and_then(Value::as_str) {
+                    if let Some(sender_nick) = self.mappings.get_nick_from_matrix(&ev.sender) {
+                        self.irc_conn.send_message(&channel, sender_nick, body);
+                    } else {
+                        warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+                    }
+                }
+            }
         }
 
-        irc_conn.write_numeric(Numeric::RPL_ENDOFWHO, &format!("{} :End of /WHO", &channel));
+        if !new {
+            // TODO: Send down new state
+        }
     }
 
     fn poll_irc(&mut self) -> Poll<(), io::Error> {
+        // Don't handle more IRC messages until we have done an initial sync.
+        // This is safe as we will get woken up by the sync.
+        if self.is_first_sync {
+            return Ok(Async::NotReady);
+        }
+
         if let Some(line) = try_ready!(self.irc_conn.poll()) {
             self.handle_irc_cmd(line);
         } else {
@@ -153,5 +172,131 @@ impl<IS: Io> Future for Bridge<IS> {
         }
 
         Ok(Async::NotReady)
+    }
+}
+
+
+#[derive(Debug, Clone, Default)]
+struct MappingStore {
+    channel_to_room_id: BTreeMap<String, String>,
+    room_id_to_channel: BTreeMap<String, String>,
+
+    matrix_uid_to_nick: BTreeMap<String, String>,
+    nick_matrix_uid: BTreeMap<String, String>,
+}
+
+impl MappingStore {
+    pub fn insert_nick<S: Io>(&mut self, irc_server: &mut IrcUserConnection<S>, nick: String, user_id: String) {
+        self.matrix_uid_to_nick.insert(user_id.clone(), nick.clone());
+        self.nick_matrix_uid.insert(nick.clone(), user_id.clone());
+
+        irc_server.create_user(nick.clone(), user_id.into());
+    }
+
+    pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&String> {
+        self.channel_to_room_id.get(channel)
+    }
+
+    pub fn create_or_get_channel_name_from_matrix<S: Io>(
+        &mut self, irc_server: &mut IrcUserConnection<S>, room: &MatrixRoom
+    ) -> (String, bool) {
+        let room_id = room.get_room_id();
+
+        if let Some(channel) = self.room_id_to_channel.get(room_id) {
+            return (channel.clone(), false);
+        }
+
+        // FIXME: Make sure it really is unique
+        let mut channel = {
+            if let Some(alias) = room.get_state_content_key("m.room.canonical_alias", "", "alias") {
+                alias.into()
+            } else if let Some(name) = room.get_name() {
+                let stripped_name: String = name.chars().filter(|c| match *c {
+                    '\x00' ... '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                    _ => true,
+                }).collect();
+
+                if !stripped_name.is_empty() {
+                    format!("#{}", stripped_name)
+                } else {
+                    format!("#{}", room_id)
+                }
+            } else {
+                format!("#{}", room_id)
+            }
+        };
+
+        if irc_server.channel_exists(&channel) {
+            loop {
+                let mut idx = 1;
+                loop {
+                    let new_channel = format!("{}[{}]", &channel, idx);
+                    if !irc_server.channel_exists(&new_channel) {
+                        channel = new_channel;
+                        break;
+                    }
+                    idx += 1;
+                }
+            }
+        }
+
+        self.room_id_to_channel.insert(room_id.into(), channel.clone());
+        self.channel_to_room_id.insert(channel.clone(), room_id.into());
+
+        let members: Vec<_> = room.get_members().iter().map(|(_, member)| {
+            (self.create_or_get_nick_from_matrix(irc_server, &member.user_id, &member.display_name), member.moderator)
+        }).collect();
+
+        irc_server.add_channel(
+            channel.clone(),
+            room.get_topic().unwrap_or("").into(),
+            &members.iter().map(|&(ref nick, op)| (nick, op)).collect::<Vec<_>>()[..],  // FIXME: To get around lifetimes
+        );
+
+        (channel, true)
+    }
+
+    pub fn create_or_get_nick_from_matrix<S: Io>(
+        &mut self, irc_server: &mut IrcUserConnection<S>, user_id: &str, display_name: &str
+    ) -> String {
+        if let Some(nick) = self.matrix_uid_to_nick.get(user_id) {
+            return nick.clone();
+        }
+
+        let mut nick: String = display_name.chars().filter(|c| match *c {
+            '\x00' ... '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+            _ => true,
+        }).collect();
+
+
+        if nick.len() < 3 {
+            nick = user_id.chars().filter(|c| match *c {
+                '\x00' ... '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                _ => true,
+            }).collect();
+        }
+
+        if irc_server.nick_exists(&nick) {
+            let mut idx = 1;
+            loop {
+                let new_nick = format!("{}[{}]", &nick, idx);
+                if !irc_server.nick_exists(&new_nick) {
+                    nick = new_nick;
+                    break;
+                }
+                idx += 1;
+            }
+        }
+
+        self.matrix_uid_to_nick.insert(user_id.into(), nick.clone());
+        self.nick_matrix_uid.insert(nick.clone(), user_id.into());
+
+        irc_server.create_user(nick.clone(), user_id.into());
+
+        nick
+    }
+
+    pub fn get_nick_from_matrix(&self, user_id: &str) -> Option<&String> {
+        self.matrix_uid_to_nick.get(user_id)
     }
 }

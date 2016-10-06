@@ -8,7 +8,7 @@ use serde_json;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use super::models::SyncResponse;
+use super::protocol::SyncResponse;
 
 use tokio_core::reactor::Handle;
 use tokio_curl::{Perform, Session};
@@ -93,7 +93,7 @@ impl MatrixSyncClient {
 
         // TODO: Handle non-200
 
-        task_debug!("Got sync response"; "next_token" => sync_response.next_batch);
+        task_trace!("Got sync response"; "next_token" => sync_response.next_batch);
 
         self.next_token = Some(sync_response.next_batch.clone());
 

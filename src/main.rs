@@ -103,6 +103,7 @@ macro_rules! task_crit {
 mod bridge;
 mod irc;
 mod matrix;
+mod stream_fold;
 
 
 #[derive(Clone)]

@@ -3,40 +3,54 @@ use curl::easy::{Easy, List};
 use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
-use std::io::{self, Read};
+use std::collections::BTreeMap;
+use std::io;
 use std::mem;
 use std::sync::{Arc, Mutex};
 
 use tokio_core::reactor::Handle;
-use tokio_curl::{Perform, Session};
+use tokio_curl::Session;
 
 use url::Url;
 
 use serde_json;
 use serde::{Serialize, Deserialize};
 
-pub mod models;
+pub mod protocol;
+mod models;
 mod sync;
+
+pub use self::models::{Room, Member};
 
 
 pub struct MatrixClient {
     url: Url,
+    user_id: String,
     access_token: String,
+    handle: Handle,
     sync_client: sync::MatrixSyncClient,
+    rooms: BTreeMap<String, Room>,
 }
 
 impl MatrixClient {
-    pub fn new(handle: Handle, base_url: &Url, access_token: String) -> MatrixClient {
+    pub fn new(handle: Handle, base_url: &Url, user_id: String, access_token: String) -> MatrixClient {
         MatrixClient {
             url: base_url.clone(),
+            user_id: user_id,
             access_token: access_token.clone(),
+            handle: handle.clone(),
             sync_client: sync::MatrixSyncClient::new(handle, base_url, access_token),
+            rooms: BTreeMap::new(),
         }
+    }
+
+    pub fn get_user_id(&self) -> &str {
+        &self.user_id
     }
 
     pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> impl Future<Item=MatrixClient, Error=LoginError> {
         let session = Session::new(handle.clone());
-        do_json_post(&session, &base_url.join("/_matrix/client/r0/login").unwrap(), &models::LoginPasswordInput {
+        do_json_post(&session, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
             user: user,
             password: password,
             login_type: "m.login.password".into(),
@@ -50,9 +64,43 @@ impl MatrixClient {
                     io::Error::new(io::ErrorKind::Other, format!("Got {} response", code))
                 )
             }
-        }).map(move |response: models::LoginResponse| {
-            MatrixClient::new(handle, &base_url, response.access_token)
+        }).map(move |response: protocol::LoginResponse| {
+            MatrixClient::new(handle, &base_url, response.user_id, response.access_token)
         })
+    }
+
+    pub fn send_text_message(&mut self, room_id: &str, body: String) -> impl Future<Item=protocol::RoomSendResponse, Error=io::Error> {
+        let session = Session::new(self.handle.clone());
+        let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message", room_id)).unwrap();
+        url
+            .query_pairs_mut()
+            .clear()
+            .append_pair("access_token", &self.access_token);
+
+        do_json_post(&session, &url, &protocol::RoomSendInput {
+            body: body,
+            msgtype: "m.text".into(),
+        })
+        .map_err(JsonPostError::into_io_error)
+    }
+
+    pub fn get_room(&self, room_id: &str) -> Option<&Room> {
+        self.rooms.get(room_id)
+    }
+
+    fn poll_sync(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
+        let resp = try_ready!(self.sync_client.poll());
+        if let Some(ref sync_response) = resp {
+            for (room_id, sync) in &sync_response.rooms.join {
+                if let Some(mut room) = self.rooms.get_mut(room_id) {
+                    room.update_from_sync(sync);
+                    continue
+                }
+                self.rooms.insert(room_id.clone(), Room::from_sync(room_id.clone(), sync));
+            }
+        }
+
+        Ok(Async::Ready(resp))
     }
 }
 
@@ -65,7 +113,6 @@ fn do_json_post<I: Serialize, O: Deserialize>(session: &Session, url: &Url, inpu
     let mut list = List::new();
     list.append("Content-Type: application/json").unwrap();
     list.append("Connection: keep-alive").unwrap();
-
 
     let input_vec = serde_json::to_vec(input).expect("input to be valid json");
 
@@ -119,6 +166,17 @@ quick_error! {
     }
 }
 
+impl JsonPostError {
+    pub fn into_io_error(self) -> io::Error {
+        match self {
+            JsonPostError::Io(err) => err,
+            JsonPostError::ErrorRepsonse(_) => {
+                io::Error::new(io::ErrorKind::Other, "Received non-200 response")
+            }
+        }
+    }
+}
+
 quick_error! {
     #[derive(Debug)]
     pub enum LoginError {
@@ -137,10 +195,10 @@ quick_error! {
 
 
 impl Stream for MatrixClient {
-    type Item = models::SyncResponse;
+    type Item = protocol::SyncResponse;
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<Option<models::SyncResponse>, io::Error> {
-        self.sync_client.poll()
+    fn poll(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
+        self.poll_sync()
     }
 }
