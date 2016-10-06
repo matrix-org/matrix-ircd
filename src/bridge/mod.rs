@@ -239,16 +239,14 @@ impl MappingStore {
         };
 
         if irc_server.channel_exists(&channel) {
+            let mut idx = 1;
             loop {
-                let mut idx = 1;
-                loop {
-                    let new_channel = format!("{}[{}]", &channel, idx);
-                    if !irc_server.channel_exists(&new_channel) {
-                        channel = new_channel;
-                        break;
-                    }
-                    idx += 1;
+                let new_channel = format!("{}[{}]", &channel, idx);
+                if !irc_server.channel_exists(&new_channel) {
+                    channel = new_channel;
+                    break;
                 }
+                idx += 1;
             }
         }
 
