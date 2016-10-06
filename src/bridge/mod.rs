@@ -101,13 +101,17 @@ impl<IS: Io> Bridge<IS> {
         if self.is_first_sync {
             info!(self.ctx.logger, "Received initial sync response");
 
-            self.is_first_sync = false;
             self.irc_conn.welcome();
             self.irc_conn.send_ping("HELLO");
         }
 
         for (room_id, sync) in &sync_response.rooms.join {
             self.handle_room_sync(room_id, sync);
+        }
+
+        if self.is_first_sync {
+            info!(self.ctx.logger, "Finished processing initial sync response");
+            self.is_first_sync = false;
         }
     }
 
