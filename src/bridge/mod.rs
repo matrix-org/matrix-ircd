@@ -1,3 +1,6 @@
+//! The module responsible for mapping IRC and Matrix onto each other.
+
+
 use ConnectionContext;
 
 use futures::{Async, Future, Poll};
@@ -30,6 +33,10 @@ pub struct Bridge<IS: Io> {
 }
 
 impl<IS: Io> Bridge<IS> {
+    /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
+    /// HS with the given user name and password.
+    ///
+    /// The bridge won't process any IRC commands until the initial sync has finished.
     pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> impl Future<Item=Bridge<IS>, Error=io::Error> {
         IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
         .and_then(move |mut user_connection| {
@@ -176,6 +183,7 @@ impl<IS: Io> Future for Bridge<IS> {
 }
 
 
+/// Handles mapping various IRC and Matrix ID's onto each other.
 #[derive(Debug, Clone, Default)]
 struct MappingStore {
     channel_to_room_id: BTreeMap<String, String>,

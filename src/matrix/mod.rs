@@ -1,3 +1,7 @@
+//! This main module responsible for keeping track of the Matrix side of the world.
+//!
+//! It knows nothing about IRC.
+
 use curl::easy::{Easy, List};
 
 use futures::{Async, Future, Poll};
@@ -23,6 +27,10 @@ mod sync;
 pub use self::models::{Room, Member};
 
 
+/// A single Matrix session.
+///
+/// A MatrixClient both send requests and outputs a Stream of SyncResponse's. It also keeps track
+/// of vaious
 pub struct MatrixClient {
     url: Url,
     user_id: String,
@@ -44,10 +52,12 @@ impl MatrixClient {
         }
     }
 
+    /// The user ID associated with this session.
     pub fn get_user_id(&self) -> &str {
         &self.user_id
     }
 
+    /// Create a session by logging in with a user name and password.
     pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> impl Future<Item=MatrixClient, Error=LoginError> {
         let session = Session::new(handle.clone());
         do_json_post(&session, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {

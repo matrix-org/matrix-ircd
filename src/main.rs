@@ -165,7 +165,6 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap_or("127.0.0.1:5999");
     let addr = bind_addr.parse::<SocketAddr>().unwrap();
-
     let matrix_url = url::Url::parse(matches.value_of("MATRIX_HS").unwrap()).unwrap();
 
     let mut tls = false;
@@ -187,6 +186,7 @@ fn main() {
 
     info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
+    // This is the main loop where we accept incoming *TCP* connections.
     let done = socket.incoming().for_each(move |(socket, addr)| {
         let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
@@ -198,6 +198,8 @@ fn main() {
         let new_handle = handle.clone();
 
         let cloned_ctx = ctx.clone();
+
+        // Set up a new task for the connection. We do this early so that the logging is correct.
         let setup_future = futures::lazy(move || {
             debug!(peer_log, "Accepted connection");
 
@@ -208,12 +210,15 @@ fn main() {
             Ok(socket)
         });
 
+        // TODO: This should be configurable. Maybe use the matrix HS server_name?
         let irc_server_name = "localhost".into();
 
-        let unhandled_error = |err| task_warn!("Unhandled IO error"; "error" => format!("{}", err));
-
+        // We need to clone here as the borrow checker doesn't like us taking ownership through
+        // two levels of closures (understandably)
         let cloned_url = matrix_url.clone();
+
         if let Some(options) = cert_pkey.clone() {
+            // Do the TLS handshake and then set up the bridge
             let future = setup_future.and_then(move |socket| {
                 tokio_tls::ServerContext::new(
                     &options.cert,
@@ -225,19 +230,24 @@ fn main() {
                 task_warn!("TLS handshake failed"; "error" => format!("{}", err));
             })
             .and_then(move |tls_socket| {
+                // the Bridge::create returns a future that resolves to a Bridge object. The
+                // Bridge object is *also* a future that we want to wait on, so we use `flatten()`
                 bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
                 .flatten()
-                .map_err(unhandled_error)
+                .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)))
             });
 
+            // We spawn the future off, otherwise we'd block the stream of incoming connections.
+            // This is what causes the future to be in its own chain.
             handle.spawn(future);
         } else {
+            // Same as above except with less TLS.
             let future = setup_future
             .and_then(move |socket| {
                 bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
             })
             .flatten()
-            .map_err(unhandled_error);
+            .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
 
             handle.spawn(future);
         };

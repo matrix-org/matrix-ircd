@@ -4,6 +4,8 @@ use futures::stream::Stream;
 use std::mem;
 
 
+/// A Stream adapater, similar to fold, that consumes the start of the stream to build up an
+/// object, but then returns both the object *and* the stream.
 #[must_use = "futures do nothing unless polled"]
 pub struct StreamFold<I, E, S: Stream<Item=I, Error=E>, V, F: FnMut(I, V) -> (bool, V)> {
     func: F,
