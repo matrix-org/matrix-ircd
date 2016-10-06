@@ -4,11 +4,11 @@ name = "irc-matrix-bridge"
 version = "0.1.0"
 
 [dependencies]
+clap = "2.14.0"
 curl = "0.3.7"
 futures = "0.1.1"
 itertools = "0.5.1"
 lazy_static = "0.2.1"
-openssl = "0.8.3"
 pest = "0.4.0"
 quick-error = "1.1.0"
 serde = "0.8.10"
@@ -31,6 +31,10 @@ git = "https://github.com/tokio-rs/tokio-timer"
 
 [dependencies.tokio-tls]
 git = "https://github.com/tokio-rs/tokio-tls"
+
+[dependencies.openssl]
+version = "0.8.3"
+features = ["x509_clone"]
 
 [features]
 clippy = []

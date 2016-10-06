@@ -10,6 +10,7 @@ extern crate futures;
 extern crate tokio_core;
 extern crate tokio_curl;
 extern crate tokio_proto;
+extern crate tokio_tls;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
@@ -22,7 +23,12 @@ extern crate pest;
 #[macro_use]
 extern crate quick_error;
 extern crate itertools;
+extern crate openssl;
+#[macro_use]
+extern crate clap;
 
+
+use clap::{Arg, App};
 
 use futures::Future;
 use futures::stream::Stream;
@@ -30,11 +36,17 @@ use futures::stream::Stream;
 use slog::DrainExt;
 
 use std::cell::RefCell;
-use std::env;
 use std::net::SocketAddr;
+use std::fs::File;
+use std::io::Read;
 
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
+
+use tokio_tls::backend::openssl::ServerContextExt;
+
+use openssl::crypto::pkey::PKey;
+use openssl::x509::X509;
 
 
 lazy_static! {
@@ -64,51 +76,158 @@ pub struct ConnectionContext {
 }
 
 
+#[derive(Clone)]
+struct TlsOptions {
+    cert: X509,
+    pkey_bytes: Vec<u8>,
+}
+
+
+fn load_cert_from_file(cert_file: &str) -> Result<X509, String> {
+    File::open(&cert_file)
+    .and_then(|mut file| {
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+        Ok(buf)
+    })
+    .map_err(|err| format!("Failed to load cert: {}", err))
+    .and_then(|buf| {
+        X509::from_pem(&buf)
+        .map_err(|err| format!("Failed to load cert: {}", err))
+    })
+}
+
+
+fn load_pkey_from_file(pkey_file: &str) -> Result<PKey, String> {
+    File::open(&pkey_file)
+    .and_then(|mut file| {
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+        Ok(buf)
+    })
+    .map_err(|err| format!("Failed to load pkey: {}", err))
+    .and_then(|buf| {
+        PKey::private_key_from_pem(&buf)
+        .map_err(|err| format!("Failed to load pkey: {}", err))
+    })
+}
+
+
 fn main() {
+    let matches = App::new("IRC Matrix Daemon")
+        .version(crate_version!())
+        .author(crate_authors!())
+        .arg(Arg::with_name("BIND")
+            .short("b")
+            .long("bind")
+            .help("Sets the address to bind to")
+            .takes_value(true)
+            .validator(|addr| {
+                addr.parse::<SocketAddr>()
+                .map(|_| ())
+                .map_err(|err| format!("Invalid bind address: {}", err))
+            })
+        )
+        .arg(Arg::with_name("CERT")
+            .long("cert")
+            .help("Sets the PEM file to read TLS cert from")
+            .takes_value(true)
+            .requires("PKEY")
+            .validator(|cert| {
+                load_cert_from_file(&cert).map(|_| ())
+            })
+        )
+        .arg(Arg::with_name("PKEY")
+            .long("pkey")
+            .help("Sets the PEM file to read TLS pkey from")
+            .takes_value(true)
+            .requires("CERT")
+            .validator(|pkey| {
+                load_pkey_from_file(&pkey).map(|_| ())
+            })
+        )
+        .get_matches();
+
     let log = &DEFAULT_LOGGER;
 
     info!(log, "Starting up");
 
-    let addr_str = env::args().nth(1).unwrap_or("127.0.0.1:5999".to_string());
-    let addr = addr_str.parse::<SocketAddr>().unwrap();
+    let bind_addr = matches.value_of("BIND").unwrap_or("127.0.0.1:5999");
+    let addr = bind_addr.parse::<SocketAddr>().unwrap();
+
+    let mut tls = false;
+    let cert_pkey = if let (Some(cert_file), Some(pkey_file)) = (matches.value_of("CERT"), matches.value_of("PKEY")) {
+        tls = true;
+
+        Some(TlsOptions {
+            cert: load_cert_from_file(cert_file).unwrap(),
+            pkey_bytes: load_pkey_from_file(pkey_file).unwrap().private_key_to_pem().unwrap(),
+        })
+    } else {
+        None
+    };
 
     let mut l = Core::new().unwrap();
     let handle = l.handle();
 
     let socket = TcpListener::bind(&addr, &handle).unwrap();
 
-    info!(log, "Started listening"; "addr" => addr_str);
+    info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
     let done = socket.incoming().for_each(move |(socket, addr)| {
         let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
+        let ctx = ConnectionContext {
+            logger: peer_log.clone(),
+            peer_addr: addr,
+        };
+
         let new_handle = handle.clone();
 
-        // We wrap the code in a lazy future so that its run in the new task.
-        handle.spawn(futures::lazy(move || {
+        let cloned_ctx = ctx.clone();
+        let setup_future = futures::lazy(move || {
             debug!(peer_log, "Accepted connection");
 
-            let ctx = ConnectionContext {
-                logger: peer_log.clone(),
-                peer_addr: addr,
-            };
-
             CONTEXT.with(|m| {
-                *m.borrow_mut() = Some(ctx.clone());
+                *m.borrow_mut() = Some(cloned_ctx);
             });
 
-            let url = url::Url::parse("http://localhost:8080/").unwrap();
+            Ok(socket)
+        });
 
-            let irc_server_name = "localhost".into();
+        let url = url::Url::parse("http://localhost:8080/").unwrap();
+        let irc_server_name = "localhost".into();
 
-            bridge::Bridge::create(new_handle, url, socket, irc_server_name, ctx)
-            .and_then(|bridge| {
-                bridge
-            }).map_err(move |err| {
-                warn!(peer_log, "Unhandled IO error"; "error" => format!("{}", err));
+        let unhandled_error = |err| task_warn!("Unhandled IO error"; "error" => format!("{}", err));
+
+        if let Some(options) = cert_pkey.clone() {
+            let future = setup_future.and_then(move |socket| {
+                tokio_tls::ServerContext::new(
+                    &options.cert,
+                    &PKey::private_key_from_pem(&options.pkey_bytes).unwrap(),
+                ).expect("Invalid cert and pem")
+                .handshake(socket)
             })
+            .map_err(move |err| {
+                task_warn!("TLS handshake failed"; "error" => format!("{}", err));
+            })
+            .and_then(move |tls_socket| {
+                bridge::Bridge::create(new_handle, url, tls_socket, irc_server_name, ctx)
+                .flatten()
+                .map_err(unhandled_error)
+            });
 
-        }));
+            handle.spawn(future);
+        } else {
+            let future = setup_future
+            .and_then(move |socket| {
+                bridge::Bridge::create(new_handle, url, socket, irc_server_name, ctx)
+            })
+            .flatten()
+            .map_err(unhandled_error);
+
+            handle.spawn(future);
+        };
 
         Ok(())
     });

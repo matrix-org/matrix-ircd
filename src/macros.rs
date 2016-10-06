@@ -33,7 +33,7 @@ macro_rules! task_info {
 
 macro_rules! task_warn {
     ($($args:tt)+) => {{
-        task_log!(::slog::Level::Warn, $($args)+);
+        task_log!(::slog::Level::Warning, $($args)+);
     }}
 }
 

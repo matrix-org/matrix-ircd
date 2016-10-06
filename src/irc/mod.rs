@@ -139,7 +139,7 @@ impl<S: Io> IrcUserConnection<S> {
     }
 
     pub fn send_ping(&mut self, data:&str) {
-        let line = format!(":{} PING {}", &self.server_name, data);
+        let line = format!("PING {}", data);
         self.write_line(&line);
     }
 
