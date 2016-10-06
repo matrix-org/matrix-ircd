@@ -20,7 +20,6 @@ tokio-curl = "0.1.0"
 url = "1.2.1"
 
 [dependencies.slog]
-features = ["max_level_trace", "release_max_level_warn"]
 version = "1.0.0"
 
 [dependencies.tokio-proto]
@@ -39,3 +38,4 @@ features = ["x509_clone"]
 [features]
 clippy = []
 default = []
+trace_logging = ["slog/max_level_trace", "slog/release_max_level_warn"]

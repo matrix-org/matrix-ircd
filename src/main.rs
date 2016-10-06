@@ -146,6 +146,17 @@ fn main() {
                 load_pkey_from_file(&pkey).map(|_| ())
             })
         )
+        .arg(Arg::with_name("MATRIX_HS")
+            .long("url")
+            .help("The base url of the Matrix HS")
+            .required(true)
+            .takes_value(true)
+            .validator(|hs| {
+                url::Url::parse(&hs)
+                .map(|_| ())
+                .map_err(|err| format!("Invalid url: {}", err))
+            })
+        )
         .get_matches();
 
     let log = &DEFAULT_LOGGER;
@@ -154,6 +165,8 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap_or("127.0.0.1:5999");
     let addr = bind_addr.parse::<SocketAddr>().unwrap();
+
+    let matrix_url = url::Url::parse(matches.value_of("MATRIX_HS").unwrap()).unwrap();
 
     let mut tls = false;
     let cert_pkey = if let (Some(cert_file), Some(pkey_file)) = (matches.value_of("CERT"), matches.value_of("PKEY")) {
@@ -195,11 +208,11 @@ fn main() {
             Ok(socket)
         });
 
-        let url = url::Url::parse("http://localhost:8080/").unwrap();
         let irc_server_name = "localhost".into();
 
         let unhandled_error = |err| task_warn!("Unhandled IO error"; "error" => format!("{}", err));
 
+        let cloned_url = matrix_url.clone();
         if let Some(options) = cert_pkey.clone() {
             let future = setup_future.and_then(move |socket| {
                 tokio_tls::ServerContext::new(
@@ -212,7 +225,7 @@ fn main() {
                 task_warn!("TLS handshake failed"; "error" => format!("{}", err));
             })
             .and_then(move |tls_socket| {
-                bridge::Bridge::create(new_handle, url, tls_socket, irc_server_name, ctx)
+                bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
                 .flatten()
                 .map_err(unhandled_error)
             });
@@ -221,7 +234,7 @@ fn main() {
         } else {
             let future = setup_future
             .and_then(move |socket| {
-                bridge::Bridge::create(new_handle, url, socket, irc_server_name, ctx)
+                bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
             })
             .flatten()
             .map_err(unhandled_error);
