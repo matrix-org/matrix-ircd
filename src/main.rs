@@ -22,7 +22,6 @@ extern crate lazy_static;
 extern crate pest;
 #[macro_use]
 extern crate quick_error;
-extern crate itertools;
 extern crate openssl;
 #[macro_use]
 extern crate clap;
