@@ -30,6 +30,7 @@ git = "https://github.com/tokio-rs/tokio-timer"
 
 [dependencies.tokio-tls]
 git = "https://github.com/tokio-rs/tokio-tls"
+features = ["force-openssl"]
 
 [dependencies.openssl]
 version = "0.8.3"
