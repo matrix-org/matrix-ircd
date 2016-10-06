@@ -27,6 +27,7 @@ pub struct IrcUserConnection<S: Io> {
     pub real_name: String,
     pub password: String,
     server_name: String,
+    user_prefix: String,
     server_model: models::ServerModel,
 }
 
@@ -77,13 +78,17 @@ impl<S: Io> IrcUserConnection<S> {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, "IRC user did not supply password"));
                 };
 
+                let user = user_nick.user.expect("user");
+                let user_prefix = format!("{}!{}@{}", &nick, &user, &server_name);
+
                 let user_conn = IrcUserConnection {
                     conn: irc_conn,
-                    user: user_nick.user.expect("user"),
+                    user: user,
                     nick: nick,
                     real_name: user_nick.real_name.expect("real_name"),
                     password: password,
                     server_name: server_name,
+                    user_prefix: user_prefix,
                     server_model: models::ServerModel::new(),
                 };
 
@@ -123,9 +128,10 @@ impl<S: Io> IrcUserConnection<S> {
 
         if let (Some(channel), Some(members)) = (server_model.get_channel(name), server_model.get_members(name)) {
             let names: Vec<_> = members.iter().map(|&(ref user, ref entry)| (&user.nick, entry.operator)).collect();
-            conn.write_join(&self.nick, &channel.name);
-            conn.write_topic(&self.nick, &channel.name, &channel.topic);
+            conn.write_join(&self.user_prefix, &channel.name);
+            conn.write_topic(&self.server_name, &channel.name, &channel.topic);
             conn.write_names(&self.nick, name, &names[..]);
+            conn.write_numeric(Numeric::RplChannelmodeis, &self.nick, &format!("{} +n", &channel.name));
             true
         } else {
             false
@@ -179,7 +185,7 @@ impl<S: Io> IrcUserConnection<S> {
     }
 
     fn handle_mode_channel_cmd(&mut self, channel: String) {
-        self.conn.write_numeric(Numeric::RplChannelmodeis, &self.nick, &channel);
+        self.conn.write_numeric(Numeric::RplChannelmodeis, &self.nick, &format!("{} +n", &channel));
     }
 
     pub fn poll(&mut self) -> Poll<Option<IrcCommand>, io::Error> {
