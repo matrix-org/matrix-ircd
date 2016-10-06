@@ -204,6 +204,7 @@ impl<S: Io> IrcUserConnection<S> {
                             // TODO
                         }
                     }
+                    IrcCommand::Pong { .. } => {}
                     c => return Ok(Async::Ready(Some(c)))
                 },
                 None => return Ok(Async::Ready(None))
