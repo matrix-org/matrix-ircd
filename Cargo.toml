@@ -27,7 +27,8 @@ version = "0.8.3"
 version = "1.0.0"
 
 [dependencies.tokio-dns]
-git = "https://github.com/sbstp/tokio-dns"
+git = "https://github.com/erikjohnston/tokio-dns"
+branch = "erikj/crates-io-deps"
 optional = false
 
 [dependencies.tokio-proto]

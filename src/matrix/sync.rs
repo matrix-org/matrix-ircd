@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{Async, Future, Poll};
+use futures::{Async, BoxFuture, Future, Poll};
 use futures::stream::Stream;
 
 use serde_json;
@@ -25,19 +25,20 @@ use super::protocol::SyncResponse;
 
 use tokio_core::reactor::Handle;
 use tokio_core::net::TcpStream;
+use tokio_dns::tcp_connect;
 
 use url::Url;
 
 use httparse;
 
 
-enum SyncState {
-    Connected(HttpStream<TcpStream>),
-    Connecting(Box<Future<Item=TcpStream, Error=io::Error>>),
+enum SyncState<T: Read + Write> {
+    Connected(HttpStream<T>),
+    Connecting(BoxFuture<T, io::Error>),
 }
 
-impl SyncState {
-    pub fn poll(&mut self) -> Poll<&mut HttpStream<TcpStream>, io::Error> {
+impl<T: Read + Write> SyncState<T> {
+    pub fn poll(&mut self) -> Poll<&mut HttpStream<T>, io::Error> {
         let socket = match *self {
             SyncState::Connecting(ref mut future)  => {
                 try_ready!(future.poll())
@@ -56,17 +57,21 @@ pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
     next_token: Option<String>,
-    sync_state: SyncState,
+    sync_state: SyncState<TcpStream>,
     write_buffer: Vec<u8>,
 }
 
 impl MatrixSyncClient {
     pub fn new(handle: Handle, base_url: &Url, access_token: String) -> MatrixSyncClient {
+        let host = base_url.host_str().unwrap();
+        let port = base_url.port_or_known_default().unwrap();
+        let tcp = tcp_connect((host, port), handle.remote().clone()).boxed();
+
         let mut client = MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token: access_token,
             next_token: None,
-            sync_state: SyncState::Connecting(TcpStream::connect(&"212.71.233.145:80".parse().unwrap(), &handle).boxed()),
+            sync_state: SyncState::Connecting(tcp),
             write_buffer: Vec::with_capacity(4096),
         };
 

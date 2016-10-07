@@ -25,6 +25,7 @@ extern crate tokio_core;
 extern crate tokio_curl;
 extern crate tokio_proto;
 extern crate tokio_tls;
+extern crate tokio_dns;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
