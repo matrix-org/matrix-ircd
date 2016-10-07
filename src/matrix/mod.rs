@@ -43,7 +43,7 @@ pub use self::models::{Room, Member};
 
 /// A single Matrix session.
 ///
-/// A MatrixClient both send requests and outputs a Stream of SyncResponse's. It also keeps track
+/// A `MatrixClient` both send requests and outputs a Stream of `SyncResponse`'s. It also keeps track
 /// of vaious
 pub struct MatrixClient {
     url: Url,
