@@ -55,7 +55,7 @@ impl MatrixSyncClient {
             let sync_response: SyncResponse = {
                 let mut http_stream = &mut self.http_stream;
 
-                let current_sync = if let Some(ref mut current_sync) = self.current_sync {
+                let mut current_sync = if let Some(current_sync) = self.current_sync.take() {
                     current_sync
                 } else {
                     self.url
@@ -82,7 +82,10 @@ impl MatrixSyncClient {
 
                 let response = match current_sync.poll().expect("sync future unexpectedly cancelled") {
                     Async::Ready(r) => r,
-                    Async::NotReady => return Ok(Async::NotReady),
+                    Async::NotReady => {
+                        self.current_sync = Some(current_sync);
+                        return Ok(Async::NotReady)
+                    },
                 };
 
                 if response.code != 200 {
