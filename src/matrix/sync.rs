@@ -80,6 +80,7 @@ impl MatrixSyncClient {
             .query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token)
+            .append_pair("filter", r#"{"presence":{"not_types":["m.presence"]}}"#)
             .append_pair("timeout", "30000");
 
         if let Some(ref token) = self.next_token {
