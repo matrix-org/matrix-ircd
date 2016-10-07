@@ -104,13 +104,15 @@ impl MatrixSyncClient {
                     self.write_buffer.drain(..written);
                 }
 
-                let response = try_ready!(http_stream.poll()).unwrap(); // TODO: Less unwrap.
+                let response = try_ready!(http_stream.poll()).expect("sync stream returned None"); // TODO: Less unwrap.
 
                 if response.code != 200 {
                     return Err(io::Error::new(io::ErrorKind::Other, format!("Sync returned {}", response.code)));
                 }
 
-                serde_json::from_slice(&response.data).unwrap()  // TODO
+                serde_json::from_slice(&response.data).map_err(|e| {
+                    io::Error::new(io::ErrorKind::Other, format!("Sync returned invalid JSON: {}", e))
+                })?
             };
 
             task_trace!("Got sync response"; "next_token" => sync_response.next_batch);
