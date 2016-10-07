@@ -17,7 +17,6 @@ dependencies = [
  "slog 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "slog-term 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-curl 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-dns 0.1.0 (git+https://github.com/erikjohnston/tokio-dns?branch=erikj/crates-io-deps)",
  "tokio-proto 0.1.0 (git+https://github.com/tokio-rs/tokio-proto)",
  "tokio-timer 0.1.0 (git+https://github.com/tokio-rs/tokio-timer)",
@@ -635,23 +634,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-curl"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "curl 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
- "futures 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.16 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "mio 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "scoped-tls 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "slab 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "ws2_32-sys 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "tokio-dns"
 version = "0.1.0"
 source = "git+https://github.com/erikjohnston/tokio-dns?branch=erikj/crates-io-deps#2b936c077afedf917942ca42572d6dd3b483c84f"
@@ -864,7 +846,6 @@ dependencies = [
 "checksum thread_local 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)" = "8576dbbfcaef9641452d5cf0df9b0e7eeab7694956dd33bb61515fb8f18cfdd5"
 "checksum time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)" = "3c7ec6d62a20df54e07ab3b78b9a3932972f4b7981de295563686849eb3989af"
 "checksum tokio-core 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "659cbae6c954dee37352853816c6a52180e47feb70be73bbfeec6d58c4da4a71"
-"checksum tokio-curl 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "5f6805da0e024c53cbb26b3841102c1873996cbf8a44c2b5c6b6d97f0c4c03c6"
 "checksum tokio-dns 0.1.0 (git+https://github.com/erikjohnston/tokio-dns?branch=erikj/crates-io-deps)" = "<none>"
 "checksum tokio-proto 0.1.0 (git+https://github.com/tokio-rs/tokio-proto)" = "<none>"
 "checksum tokio-service 0.1.0 (git+https://github.com/tokio-rs/tokio-service)" = "<none>"
