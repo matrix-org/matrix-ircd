@@ -39,6 +39,7 @@ extern crate quick_error;
 extern crate openssl;
 #[macro_use]
 extern crate clap;
+extern crate httparse;
 
 
 use clap::{Arg, App};

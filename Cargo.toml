@@ -7,6 +7,7 @@ version = "0.1.0"
 clap = "2.14.0"
 curl = "0.3.7"
 futures = "0.1.1"
+httparse = "1.1.2"
 lazy_static = "0.2.1"
 pest = "0.4.0"
 quick-error = "1.1.0"
@@ -18,8 +19,16 @@ tokio-core = "0.1.0"
 tokio-curl = "0.1.0"
 url = "1.2.1"
 
+[dependencies.openssl]
+features = ["x509_clone"]
+version = "0.8.3"
+
 [dependencies.slog]
 version = "1.0.0"
+
+[dependencies.tokio-dns]
+git = "https://github.com/sbstp/tokio-dns"
+optional = false
 
 [dependencies.tokio-proto]
 git = "https://github.com/tokio-rs/tokio-proto"
@@ -28,12 +37,8 @@ git = "https://github.com/tokio-rs/tokio-proto"
 git = "https://github.com/tokio-rs/tokio-timer"
 
 [dependencies.tokio-tls]
-git = "https://github.com/tokio-rs/tokio-tls"
 features = ["force-openssl"]
-
-[dependencies.openssl]
-version = "0.8.3"
-features = ["x509_clone"]
+git = "https://github.com/tokio-rs/tokio-tls"
 
 [features]
 clippy = []

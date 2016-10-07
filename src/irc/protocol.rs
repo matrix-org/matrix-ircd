@@ -399,14 +399,14 @@ mod tests {
 
     #[test]
     fn simple_prefix() {
-        assert_eq!(parse_irc_line(":example.com PrivMsg #test :Some text"),
+        assert_eq!(parse_irc_line(":example.com PRIVMSG #test :Some text"),
                    Some(IrcLine {
                        prefix: Some("example.com".into()),
                        command: Command::PrivMsg,
                        args: vec!["#test".into(), "Some text".into()],
                    }));
 
-        assert_eq!(":example.com PrivMsg #test :Some text".parse().ok(),
+        assert_eq!(":example.com PRIVMSG #test :Some text".parse().ok(),
                    Some(IrcCommand::PrivMsg {
                        channel: "#test".into(),
                        text: "Some text".into(),
