@@ -98,21 +98,17 @@ impl MatrixSyncClient {
             let sync_response: SyncResponse = {
                 let mut http_stream = try_ready!(self.sync_state.poll());
 
-                task_trace!("Got http stream");
-
                 if !self.write_buffer.is_empty() {
                     task_trace!("Writing buffers");
                     let written = http_stream.get_inner_mut().write(&self.write_buffer)?;
                     self.write_buffer.drain(..written);
                 }
 
-                task_trace!("Polling response");
-
                 let response = try_ready!(http_stream.poll()).unwrap(); // TODO: Less unwrap.
 
-                task_trace!("Got response");
-
-                // TODO: Handle non-200
+                if response.code != 200 {
+                    return Err(io::Error::new(io::ErrorKind::Other, format!("Sync returned {}", response.code)));
+                }
 
                 serde_json::from_slice(&response.data).unwrap()  // TODO
             };
