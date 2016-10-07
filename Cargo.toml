@@ -9,6 +9,7 @@ curl = "0.3.7"
 futures = "0.1.1"
 httparse = "1.1.2"
 lazy_static = "0.2.1"
+netbuf = "0.3.2"
 pest = "0.4.0"
 quick-error = "1.1.0"
 serde = "0.8.10"
@@ -27,8 +28,8 @@ version = "0.8.3"
 version = "1.0.0"
 
 [dependencies.tokio-dns]
-git = "https://github.com/erikjohnston/tokio-dns"
 branch = "erikj/crates-io-deps"
+git = "https://github.com/erikjohnston/tokio-dns"
 optional = false
 
 [dependencies.tokio-proto]

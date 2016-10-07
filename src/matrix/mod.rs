@@ -34,6 +34,9 @@ use url::Url;
 use serde_json;
 use serde::{Serialize, Deserialize};
 
+use http::{Request, Response, HttpStream};
+
+
 pub mod protocol;
 mod models;
 mod sync;

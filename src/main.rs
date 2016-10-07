@@ -41,6 +41,7 @@ extern crate openssl;
 #[macro_use]
 extern crate clap;
 extern crate httparse;
+extern crate netbuf;
 
 
 use clap::{Arg, App};
@@ -82,6 +83,7 @@ mod bridge;
 mod irc;
 mod matrix;
 mod stream_fold;
+mod http;
 
 
 #[derive(Clone)]
