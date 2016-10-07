@@ -52,7 +52,7 @@ impl<S: Io> IrcServerConnection<S> {
         {
             let mut inner = self.inner.lock().unwrap();
 
-            trace!(self.ctx.logger, "Writting line"; "line" => line);
+            trace!(self.ctx.logger, "Writing line"; "line" => line);
 
             {
                 let mut v = inner.write_buffer.get_mut();
