@@ -93,6 +93,7 @@ impl<IS: Io> Bridge<IS> {
         match line {
             IrcCommand::PrivMsg { channel, text } => {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
+                    info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
                     let logger = self.ctx.logger.clone();
                     self.handle.spawn(
                         self.matrix_client.send_text_message(room_id, text)

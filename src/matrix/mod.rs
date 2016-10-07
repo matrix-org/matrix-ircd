@@ -16,25 +16,20 @@
 //!
 //! It knows nothing about IRC.
 
-use curl::easy::{Easy, List};
-
 use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
 use std::collections::BTreeMap;
 use std::io;
-use std::mem;
-use std::sync::{Arc, Mutex};
 
 use tokio_core::reactor::Handle;
-use tokio_curl::Session;
 
 use url::Url;
 
 use serde_json;
 use serde::{Serialize, Deserialize};
 
-use http::{Request, Response, HttpStream};
+use http::{Request, HttpStream};
 
 
 pub mod protocol;
@@ -52,20 +47,20 @@ pub struct MatrixClient {
     url: Url,
     user_id: String,
     access_token: String,
-    handle: Handle,
     sync_client: sync::MatrixSyncClient,
     rooms: BTreeMap<String, Room>,
+    http_stream: HttpStream
 }
 
 impl MatrixClient {
-    pub fn new(handle: Handle, base_url: &Url, user_id: String, access_token: String) -> MatrixClient {
+    pub fn new(handle: Handle, http_stream: HttpStream, base_url: &Url, user_id: String, access_token: String) -> MatrixClient {
         MatrixClient {
             url: base_url.clone(),
             user_id: user_id,
             access_token: access_token.clone(),
-            handle: handle.clone(),
             sync_client: sync::MatrixSyncClient::new(handle, base_url, access_token),
             rooms: BTreeMap::new(),
+            http_stream: http_stream,
         }
     }
 
@@ -76,8 +71,12 @@ impl MatrixClient {
 
     /// Create a session by logging in with a user name and password.
     pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> impl Future<Item=MatrixClient, Error=LoginError> {
-        let session = Session::new(handle.clone());
-        do_json_post(&session, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
+        let host = base_url.host_str().expect("expected host in base_url").to_string();
+        let port = base_url.port_or_known_default().unwrap();
+
+        let mut http_stream = HttpStream::new(host, port, handle.clone());
+
+        let future = do_json_post(&mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
             user: user,
             password: password,
             login_type: "m.login.password".into(),
@@ -91,20 +90,22 @@ impl MatrixClient {
                     io::Error::new(io::ErrorKind::Other, format!("Got {} response", code))
                 )
             }
-        }).map(move |response: protocol::LoginResponse| {
-            MatrixClient::new(handle, &base_url, response.user_id, response.access_token)
+        });
+
+        WrappedHttp::new(
+            future, http_stream
+        ).map(move |(http_stream, response): (HttpStream, protocol::LoginResponse)| {
+            MatrixClient::new(handle, http_stream, &base_url, response.user_id, response.access_token)
         })
     }
 
     pub fn send_text_message(&mut self, room_id: &str, body: String) -> impl Future<Item=protocol::RoomSendResponse, Error=io::Error> {
-        let session = Session::new(self.handle.clone());
         let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message", room_id)).unwrap();
-        url
-            .query_pairs_mut()
+        url.query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token);
 
-        do_json_post(&session, &url, &protocol::RoomSendInput {
+        do_json_post(&mut self.http_stream, &url, &protocol::RoomSendInput {
             body: body,
             msgtype: "m.text".into(),
         })
@@ -132,48 +133,23 @@ impl MatrixClient {
 }
 
 
-fn do_json_post<I: Serialize, O: Deserialize>(session: &Session, url: &Url, input: &I)
+fn do_json_post<I: Serialize, O: Deserialize>(stream: &mut HttpStream, url: &Url, input: &I)
     -> impl Future<Item=O, Error=JsonPostError>
 {
-    let mut req = Easy::new();
-
-    let mut list = List::new();
-    list.append("Content-Type: application/json").unwrap();
-    list.append("Connection: keep-alive").unwrap();
-
-    let input_vec = serde_json::to_vec(input).expect("input to be valid json");
-
-    req.post(true).unwrap();
-    req.url(url.as_str()).unwrap();
-    req.post_field_size(input_vec.len() as u64).unwrap();
-    req.http_headers(list).unwrap();
-
-    req.post_fields_copy(&input_vec).unwrap();
-
-    let output_vec: Arc<Mutex<Vec<u8>>> = Arc::default();
-    let output_vec_ptr = output_vec.clone();
-    req.write_function(move |data| {
-        output_vec.lock().unwrap().extend_from_slice(data);
-        Ok(data.len())
-    }).unwrap();
-
-    session.perform(req)
-    .map_err(|err| err.into_error().into())
-    .and_then(move |mut req| {
-
-        let resp_code = req.response_code().unwrap();
-
-        mem::drop(req);  // get rid of the strong reference to out vec.
-
-        if resp_code != 200 {
-            return Err(JsonPostError::ErrorRepsonse(resp_code));
+    stream.send_request(&Request {
+        method: "POST",
+        path: &format!("{}?{}", url.path(), url.query().unwrap_or("")),
+        headers: &[("Content-Type", "application/json")],
+        body: &serde_json::to_vec(input).expect("input to be valid json"),
+    })
+    .map_err(|_| io::Error::new(io::ErrorKind::Other, "request future unexpectedly cancelled").into())
+    .and_then(move |resp| {
+        if resp.code != 200 {
+            return Err(JsonPostError::ErrorRepsonse(resp.code));
         }
 
-        let out_vec = Arc::try_unwrap(output_vec_ptr).expect("expected nothing to have strong reference")
-            .into_inner().expect("Lock to not be poisoned");
-
-        serde_json::from_slice(&out_vec)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid json response").into())
+        serde_json::from_slice(&resp.data)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid json response").into())
     })
 }
 
@@ -186,7 +162,7 @@ quick_error! {
             display("I/O error: {}", err)
             cause(err)
         }
-        ErrorRepsonse(code: u32) {
+        ErrorRepsonse(code: u16) {
             description("received non 200 response")
             display("Received response: {}", code)
         }
@@ -226,6 +202,46 @@ impl Stream for MatrixClient {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
+        self.http_stream.poll()?;
         self.poll_sync()
+    }
+}
+
+
+
+struct WrappedHttp<T, E> {
+    future: Box<Future<Item=T, Error=E>>,
+    http_stream: Option<HttpStream>,
+}
+
+impl<T, E> WrappedHttp<T, E> {
+    pub fn new<F: Future<Item=T, Error=E> + 'static>(future: F, http_stream: HttpStream) -> WrappedHttp<T, E> {
+        WrappedHttp {
+            future: Box::new(future),
+            http_stream: Some(http_stream),
+        }
+    }
+}
+
+impl<T, E: From<io::Error>> Future for WrappedHttp<T, E> {
+    type Item = (HttpStream, T);
+    type Error = E;
+
+    fn poll(&mut self) -> Poll<(HttpStream, T), E> {
+        task_trace!("WrappedHttp polled");
+
+        let mut http_stream = self.http_stream.take().expect("WrappedHttp cannot be repolled");
+
+        http_stream.poll()?;
+
+        let res = match self.future.poll()? {
+            Async::Ready(res) => res,
+            Async::NotReady => {
+                self.http_stream = Some(http_stream);
+                return Ok(Async::NotReady);
+            }
+        };
+
+        Ok(Async::Ready((http_stream, res)))
     }
 }

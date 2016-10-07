@@ -12,16 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{self, Async, Poll};
+use futures::{self, Async, Future, Poll};
 
 use std::collections::VecDeque;
 use std::{self, mem, io, str};
 use std::io::{Read, Write};
 use std::str::FromStr;
 
+use tokio_core::reactor::Handle;
+use tokio_core::net::TcpStream;
+use tokio_dns::tcp_connect;
 
 use httparse;
 use netbuf;
+
+
+enum ConnectionState<T: Read + Write> {
+    Connected(T),
+    Connecting(Box<Future<Item=T, Error=io::Error>>),
+}
+
+impl<T: Read + Write> ConnectionState<T> {
+    pub fn poll(&mut self) -> Poll<&mut T, io::Error> {
+        let socket = match *self {
+            ConnectionState::Connecting(ref mut future)  => {
+                try_ready!(future.poll())
+            }
+            ConnectionState::Connected(ref mut stream) => return Ok(Async::Ready(stream)),
+        };
+
+        *self = ConnectionState::Connected(socket);
+
+        self.poll()
+    }
+}
 
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -35,7 +59,6 @@ pub struct Response {
 pub struct Request<'a> {
     pub method: &'a str,
     pub path: &'a str,
-    pub host: &'a str,
     pub headers: &'a [(&'a str, &'a str)],
     pub body: &'a [u8],
 }
@@ -48,34 +71,39 @@ enum HttpStreamState {
     ChunkedData,
 }
 
-
-pub struct HttpStream<Stream: Read> {
-    stream: Stream,
+#[must_use = "http stream must be polled"]
+pub struct HttpStream {
     response_buffer: Vec<u8>,
     write_buffer: netbuf::Buf,
     curr_state: HttpStreamState,
     partial_response: Response,
     requests: VecDeque<futures::Complete<Response>>,
+    connection_state: ConnectionState<TcpStream>,
+    host: String,
 }
 
-impl<S: Read> HttpStream<S> {
-    pub fn new(stream: S) -> HttpStream<S> {
+impl HttpStream {
+    pub fn new(host: String, port: u16, handle: Handle) -> HttpStream {
+        let tcp = tcp_connect((host.as_str(), port), handle.remote().clone()).boxed();
+
         HttpStream {
-            stream: stream,
             response_buffer: Vec::with_capacity(4096),
             write_buffer: netbuf::Buf::new(),
             curr_state: HttpStreamState::Headers,
             partial_response: Response::default(),
             requests: VecDeque::new(),
+            connection_state: ConnectionState::Connecting(tcp),
+            host: host,
         }
     }
 
     pub fn send_request(&mut self, request: &Request) -> futures::Oneshot<Response> {
         write!(self.write_buffer, "{} {} HTTP/1.1\r\n", request.method, request.path).unwrap();
-        write!(self.write_buffer, "Host: {}\r\n", request.host).unwrap();
+        write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
+        write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
         write!(self.write_buffer, "Content-Length: {}\r\n", request.body.len()).unwrap();
         for &(name, value) in request.headers {
-            write!(self.write_buffer, "{}: {}\n\n", name, value).unwrap();
+            write!(self.write_buffer, "{}: {}\r\n", name, value).unwrap();
         }
         write!(self.write_buffer, "\r\n").unwrap();
         self.write_buffer.extend(request.body);
@@ -89,6 +117,11 @@ impl<S: Read> HttpStream<S> {
 
     pub fn poll(&mut self) -> Poll<(), io::Error> {
         loop {
+            if !self.write_buffer.is_empty() {
+                let mut stream = try_ready!(self.connection_state.poll());
+                self.write_buffer.write_to(stream)?;
+            }
+
             let resp = try_ready!(self.poll_for_response());
             if let Some(future) = self.requests.pop_front() {
                 future.complete(resp);
@@ -99,7 +132,7 @@ impl<S: Read> HttpStream<S> {
     }
 
     fn poll_for_response(&mut self) -> Poll<Response, io::Error> {
-        let mut stream = &mut self.stream;
+        let mut stream = try_ready!(self.connection_state.poll());
 
         loop {
             match self.curr_state {

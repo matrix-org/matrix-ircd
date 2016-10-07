@@ -12,65 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{self, Async, BoxFuture, Future, Poll};
+use futures::{self, Async, Future, Poll};
 use futures::stream::Stream;
 
 use serde_json;
 
 use std::{io, str};
-use std::io::{Read, Write};
 
 use super::protocol::SyncResponse;
 
 use tokio_core::reactor::Handle;
-use tokio_core::net::TcpStream;
-use tokio_dns::tcp_connect;
 
 use url::Url;
 
 use http::{Request, Response, HttpStream};
 
 
-enum SyncState<T: Read + Write> {
-    Connected(HttpStream<T>),
-    Connecting(BoxFuture<T, io::Error>),
-}
-
-impl<T: Read + Write> SyncState<T> {
-    pub fn poll(&mut self) -> Poll<&mut HttpStream<T>, io::Error> {
-        let socket = match *self {
-            SyncState::Connecting(ref mut future)  => {
-                try_ready!(future.poll())
-            }
-            SyncState::Connected(ref mut stream) => return Ok(Async::Ready(stream)),
-        };
-
-        *self = SyncState::Connected(HttpStream::new(socket));
-
-        self.poll()
-    }
-}
-
-
 pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
     next_token: Option<String>,
-    sync_state: SyncState<TcpStream>,
+    http_stream: HttpStream,
     current_sync: Option<futures::Oneshot<Response>>,
 }
 
 impl MatrixSyncClient {
     pub fn new(handle: Handle, base_url: &Url, access_token: String) -> MatrixSyncClient {
-        let host = base_url.host_str().unwrap();
+        let host = base_url.host_str().expect("expected host in base_url");
         let port = base_url.port_or_known_default().unwrap();
-        let tcp = tcp_connect((host, port), handle.remote().clone()).boxed();
 
         MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token: access_token,
             next_token: None,
-            sync_state: SyncState::Connecting(tcp),
+            http_stream: HttpStream::new(host.into(), port, handle),
             current_sync: None,
         }
     }
@@ -78,7 +53,7 @@ impl MatrixSyncClient {
     pub fn poll_sync(&mut self) -> Poll<SyncResponse, io::Error> {
         loop {
             let sync_response: SyncResponse = {
-                let mut http_stream = try_ready!(self.sync_state.poll());
+                let mut http_stream = &mut self.http_stream;
 
                 let current_sync = if let Some(ref mut current_sync) = self.current_sync {
                     current_sync
@@ -96,7 +71,6 @@ impl MatrixSyncClient {
 
                     self.current_sync = Some(http_stream.send_request(&Request {
                         method: "GET",
-                        host: self.url.host_str().expect("expected host in base_url"),
                         path: &format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
                         headers: &[],
                         body: &[],
