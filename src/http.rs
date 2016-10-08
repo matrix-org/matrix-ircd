@@ -140,7 +140,7 @@ impl HttpStream {
                     if self.response_buffer.is_empty() {
                         let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF"));
+                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF while waiting for new response"));
                         }
                     }
 
@@ -191,7 +191,7 @@ impl HttpStream {
                     } else {
                         let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF"));
+                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF parsing headers"));
                         }
                     }
                 }
@@ -217,16 +217,13 @@ impl HttpStream {
                             let resp = mem::replace(&mut self.partial_response, Response::default());
                             return Ok(Async::Ready(resp));
                         } else {
-                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF"));
+                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF parsing body"));
                         }
                     }
                 }
                 HttpStreamState::ChunkedData => {
-                    println!("Got chunk: {:?}", &self.response_buffer);
                     match httparse::parse_chunk_size(&self.response_buffer[..]) {
                         Ok(httparse::Status::Complete((bytes_read, 0))) => {
-                            println!("Got chunk: {} {}", bytes_read, 0);
-
                             // +2 as chunks end in \r\n
                             if self.response_buffer.len() >= bytes_read + 2 {
                                 self.response_buffer.drain(..bytes_read + 2);
@@ -237,7 +234,6 @@ impl HttpStream {
                             }
                         }
                         Ok(httparse::Status::Complete((bytes_read, chunk_len_64))) => {
-                            println!("Got chunk: {} {}", bytes_read, chunk_len_64);
                             let chunk_len = chunk_len_64 as usize;
 
                             // +2 as chunks end in \r\n
@@ -255,7 +251,7 @@ impl HttpStream {
 
                     let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
                     if num_bytes == 0 {
-                        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF"));
+                        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF parsing chunked body"));
                     }
                 }
             }

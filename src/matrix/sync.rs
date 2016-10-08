@@ -51,6 +51,7 @@ impl MatrixSyncClient {
     }
 
     pub fn poll_sync(&mut self) -> Poll<SyncResponse, io::Error> {
+        task_trace!("Polled sync");
         loop {
             let sync_response: SyncResponse = {
                 let mut http_stream = &mut self.http_stream;

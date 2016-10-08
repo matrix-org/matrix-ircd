@@ -173,8 +173,8 @@ impl JsonPostError {
     pub fn into_io_error(self) -> io::Error {
         match self {
             JsonPostError::Io(err) => err,
-            JsonPostError::ErrorRepsonse(_) => {
-                io::Error::new(io::ErrorKind::Other, "Received non-200 response")
+            JsonPostError::ErrorRepsonse(code) => {
+                io::Error::new(io::ErrorKind::Other, format!("Received {} response", code))
             }
         }
     }
@@ -202,6 +202,7 @@ impl Stream for MatrixClient {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
+        task_trace!("Polled matrix client");
         self.http_stream.poll()?;
         self.poll_sync()
     }
