@@ -251,6 +251,9 @@ fn main() {
                 bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
                 .flatten()
                 .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)))
+            }).then(|r| {
+                task_info!("Finished");
+                r
             });
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
