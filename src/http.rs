@@ -28,36 +28,50 @@ use httparse;
 use netbuf;
 
 
-#[derive(Default)]
 struct HttpClientInner {
     requests: VecDeque<(Request, futures::Complete<Result<Response, io::Error>>)>,
     task: Option<task::Task>,
-    errored: bool,
+    connection_state: ConnectionState,
+}
+
+impl HttpClientInner {
+    pub fn new() -> HttpClientInner {
+        HttpClientInner {
+            requests: VecDeque::new(),
+            task: None,
+            connection_state: ConnectionState::Closed,
+        }
+    }
+}
+
+impl Default for HttpClientInner {
+    fn default() -> HttpClientInner {
+        HttpClientInner::new()
+    }
 }
 
 pub struct HttpClient {
     inner: Arc<Mutex<HttpClientInner>>,
+    host: String,
+    port: u16,
+    handle: Handle,
 }
 
 impl HttpClient {
     pub fn new(host: String, port: u16, handle: Handle) -> HttpClient {
         let inner: Arc<Mutex<HttpClientInner>> = Arc::default();
-        let inner_handle = inner.clone();
-
-        let tcp = tcp_connect(
-            (host.as_str(), port), handle.remote().clone()
-        ).and_then(move |socket| {
-            HttpClientHandler::new(inner_handle, host, socket)
-        }).map_err(|_| ()); // TODO: Handle error better
-
-        handle.spawn(tcp);
 
         HttpClient {
             inner: inner,
+            host: host,
+            port: port,
+            handle: handle,
         }
     }
 
     pub fn send_request(&mut self, request: Request) -> HttpResponseFuture {
+        self.maybe_start_connection();
+
         let mut inner = self.inner.lock().expect("lock is poisoned");
 
         let (c, o) = futures::oneshot();
@@ -68,6 +82,29 @@ impl HttpClient {
         }
 
         o.into()
+    }
+
+    fn maybe_start_connection(&mut self) {
+        {
+            let mut inner = self.inner.lock().expect("http client lock was poisoned");
+            if let ConnectionState::Connected = inner.connection_state {
+                return
+            }
+            inner.connection_state = ConnectionState::Connected;
+        }
+
+        let inner_clone = self.inner.clone();
+        let host_clone = self.host.clone();
+
+        let tcp = tcp_connect(
+            (self.host.as_str(), self.port), self.handle.remote().clone()
+        ).and_then(move |socket| {
+            HttpClientHandler::new(inner_clone, host_clone, socket)
+        }).map_err(|_| {
+            // TODO: Handle error better
+        });
+
+        self.handle.spawn(tcp);
     }
 }
 
@@ -273,7 +310,7 @@ impl<T: Io> HttpClientHandler<T> {
 impl<T: Io> Drop for HttpClientHandler<T> {
     fn drop(&mut self) {
         let mut inner = self.inner.lock().expect("lock is poisoned");
-        inner.errored = true;
+        inner.connection_state = ConnectionState::Closed;
     }
 }
 
@@ -285,10 +322,7 @@ impl<T: Io> Future for HttpClientHandler<T> {
         match self.poll_inner() {
             Ok(r) => Ok(r),
             Err(e) => {
-                {
-                    let mut inner = self.inner.lock().expect("lock is poisoned");
-                    inner.errored = true;
-                }
+                // TODO: Should we notify that thing has finished?
 
                 for f in self.requests.drain(..) {
                     f.complete(Err(clone_io_error(&e)));
@@ -362,6 +396,9 @@ fn read_into_vec<R: io::Read>(stream: &mut R, buf: &mut netbuf::Buf) -> Poll<usi
     let size = try_nb!(buf.read_from(stream));
     Ok(Async::Ready(size))
 }
+
+
+enum ConnectionState { Closed, Connected }
 
 
 #[cfg(test)]
