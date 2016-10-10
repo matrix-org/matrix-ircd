@@ -25,7 +25,7 @@ use tokio_core::reactor::Handle;
 
 use url::Url;
 
-use http::{Request, Response, HttpStream};
+use http::{Request, Response, HttpStream, HttpResponseFuture};
 
 
 pub struct MatrixSyncClient {
@@ -33,7 +33,7 @@ pub struct MatrixSyncClient {
     access_token: String,
     next_token: Option<String>,
     http_stream: HttpStream,
-    current_sync: Option<futures::Oneshot<Response>>,
+    current_sync: Option<HttpResponseFuture>,
 }
 
 impl MatrixSyncClient {

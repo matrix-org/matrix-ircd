@@ -48,6 +48,32 @@ impl<T: Read + Write> ConnectionState<T> {
 }
 
 
+
+pub struct HttpResponseFuture {
+    future: futures::Oneshot<Result<Response, io::Error>>,
+}
+
+impl Future for HttpResponseFuture {
+    type Item = Response;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Response, io::Error> {
+        match self.future.poll() {
+            Ok(Async::Ready(Ok(response))) => Ok(Async::Ready(response)),
+            Ok(Async::Ready(Err(e))) => Err(e),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "stream went away")),
+        }
+    }
+}
+
+impl From<futures::Oneshot<Result<Response, io::Error>>> for HttpResponseFuture {
+    fn from(future: futures::Oneshot<Result<Response, io::Error>>) -> HttpResponseFuture {
+        HttpResponseFuture { future: future }
+    }
+}
+
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Response {
     pub code: u16,
@@ -77,7 +103,7 @@ pub struct HttpStream {
     write_buffer: netbuf::Buf,
     curr_state: HttpStreamState,
     partial_response: Response,
-    requests: VecDeque<futures::Complete<Response>>,
+    requests: VecDeque<futures::Complete<Result<Response, io::Error>>>,
     connection_state: ConnectionState<TcpStream>,
     host: String,
 }
@@ -97,7 +123,7 @@ impl HttpStream {
         }
     }
 
-    pub fn send_request(&mut self, request: &Request) -> futures::Oneshot<Response> {
+    pub fn send_request(&mut self, request: &Request) -> HttpResponseFuture {
         write!(self.write_buffer, "{} {} HTTP/1.1\r\n", request.method, request.path).unwrap();
         write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
         write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
@@ -112,7 +138,7 @@ impl HttpStream {
 
         self.requests.push_back(c);
 
-        o
+        o.into()
     }
 
     pub fn poll(&mut self) -> Poll<(), io::Error> {
@@ -124,7 +150,7 @@ impl HttpStream {
 
             let resp = try_ready!(self.poll_for_response());
             if let Some(future) = self.requests.pop_front() {
-                future.complete(resp);
+                future.complete(Ok(resp));
             } else {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "Response without request"));
             }
