@@ -15,7 +15,7 @@
 use futures::{self, Async, Future, Poll};
 
 use std::collections::VecDeque;
-use std::{self, mem, io, str};
+use std::{mem, io, str};
 use std::io::{Read, Write};
 use std::str::FromStr;
 
@@ -73,7 +73,7 @@ enum HttpStreamState {
 
 #[must_use = "http stream must be polled"]
 pub struct HttpStream {
-    response_buffer: Vec<u8>,
+    response_buffer: netbuf::Buf,
     write_buffer: netbuf::Buf,
     curr_state: HttpStreamState,
     partial_response: Response,
@@ -87,7 +87,7 @@ impl HttpStream {
         let tcp = tcp_connect((host.as_str(), port), handle.remote().clone()).boxed();
 
         HttpStream {
-            response_buffer: Vec::with_capacity(4096),
+            response_buffer: netbuf::Buf::new(),
             write_buffer: netbuf::Buf::new(),
             curr_state: HttpStreamState::Headers,
             partial_response: Response::default(),
@@ -187,7 +187,7 @@ impl HttpStream {
                     };
 
                     if let Some(bytes_read) = bytes_read_opt {
-                        self.response_buffer.drain(..bytes_read);
+                        self.response_buffer.consume(bytes_read);
                     } else {
                         let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
@@ -199,9 +199,11 @@ impl HttpStream {
                     if let Some(len) = len_opt {
                         if self.response_buffer.len() >= len {
                             if self.response_buffer.len() == len {
-                                mem::swap(&mut self.response_buffer, &mut self.partial_response.data);
+                                let buf = mem::replace(&mut self.response_buffer, netbuf::Buf::new());
+                                self.partial_response.data = buf.into();
                             } else {
-                                self.partial_response.data = self.response_buffer.drain(..len).collect();
+                                self.partial_response.data = self.response_buffer[..len].to_vec();
+                                self.response_buffer.consume(len);
                             }
 
                             self.curr_state = HttpStreamState::Headers;
@@ -226,7 +228,7 @@ impl HttpStream {
                         Ok(httparse::Status::Complete((bytes_read, 0))) => {
                             // +2 as chunks end in \r\n
                             if self.response_buffer.len() >= bytes_read + 2 {
-                                self.response_buffer.drain(..bytes_read + 2);
+                                self.response_buffer.consume(bytes_read + 2);
 
                                 self.curr_state = HttpStreamState::Headers;
                                 let resp = mem::replace(&mut self.partial_response, Response::default());
@@ -241,7 +243,7 @@ impl HttpStream {
                                 self.partial_response.data.extend_from_slice(
                                     &self.response_buffer[bytes_read..bytes_read + chunk_len]
                                 );
-                                self.response_buffer.drain(..bytes_read + chunk_len + 2);
+                                self.response_buffer.consume(bytes_read + chunk_len + 2);
                                 continue;
                             }
                         }
@@ -261,24 +263,9 @@ impl HttpStream {
 
 
 
-fn read_into_vec<R: io::Read>(stream: &mut R, vec: &mut Vec<u8>) -> Poll<usize, io::Error> {
-    let start_len = vec.len();
-    let new_size = std::cmp::max(start_len + 1024, 4096);
-    vec.resize(start_len + new_size, 0);
-    match stream.read(&mut vec[start_len..]) {
-        Ok(num_bytes) => {
-            vec.resize(start_len + num_bytes, 0);
-            Ok(Async::Ready(num_bytes))
-        }
-        Err(e) => {
-            vec.resize(start_len, 0);
-            if e.kind() == io::ErrorKind::WouldBlock {
-                Ok(Async::NotReady)
-            } else {
-                Err(e)
-            }
-        }
-    }
+fn read_into_vec<R: io::Read>(stream: &mut R, buf: &mut netbuf::Buf) -> Poll<usize, io::Error> {
+    let size = try_nb!(buf.read_from(stream));
+    Ok(Async::Ready(size))
 }
 
 #[cfg(test)]
