@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 use tokio_core::reactor::Handle;
 use tokio_core::io::Io;
 use tokio_dns::tcp_connect;
+use tokio_tls;
 
 use httparse;
 use netbuf;
@@ -54,16 +55,28 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    pub fn new(host: String, port: u16, handle: Handle) -> HttpClient {
+    pub fn new(host: String, port: u16, tls: bool, handle: Handle) -> HttpClient {
         let inner: Arc<Mutex<HttpClientInner>> = Arc::default();
 
         let host_clone = host.clone();
 
-        ReconnectingStream::spawn(handle, inner.clone(), host.clone(), Box::new(move |handle| {
-            tcp_connect(
-                (host_clone.as_str(), port), handle.remote().clone()
-            )
-        }));
+        if tls {
+            ReconnectingStream::spawn(handle, inner.clone(), host.clone(), Box::new(move |handle| {
+                let host_clone = host_clone.clone();  // Can't move out in FnMut.
+                tcp_connect(
+                    (host_clone.as_str(), port), handle.remote().clone()
+                ).and_then(move |stream| {
+                    let client = tokio_tls::ClientContext::new().expect("failed to initialize ssl");
+                    client.handshake(&host_clone, stream)
+                })
+            }));
+        } else {
+            ReconnectingStream::spawn(handle, inner.clone(), host.clone(), Box::new(move |handle| {
+                tcp_connect(
+                    (host_clone.as_str(), port), handle.remote().clone()
+                )
+            }));
+        }
 
         HttpClient {
             inner: inner,

@@ -73,8 +73,13 @@ impl MatrixClient {
     pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> impl Future<Item=MatrixClient, Error=LoginError> {
         let host = base_url.host_str().expect("expected host in base_url").to_string();
         let port = base_url.port_or_known_default().unwrap();
+        let tls = match base_url.scheme() {
+            "http" => false,
+            "https" => true,
+            _ => panic!("Unrecognized scheme {}", base_url.scheme()),
+        };
 
-        let mut http_stream = HttpClient::new(host, port, handle.clone());
+        let mut http_stream = HttpClient::new(host, port, tls, handle.clone());
 
         do_json_post(&mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
             user: user,

@@ -41,11 +41,17 @@ impl MatrixSyncClient {
         let host = base_url.host_str().expect("expected host in base_url");
         let port = base_url.port_or_known_default().unwrap();
 
+        let tls = match base_url.scheme() {
+            "http" => false,
+            "https" => true,
+            _ => panic!("Unrecognized scheme {}", base_url.scheme()),
+        };
+
         MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token: access_token,
             next_token: None,
-            http_stream: HttpClient::new(host.into(), port, handle),
+            http_stream: HttpClient::new(host.into(), port, tls, handle),
             current_sync: None,
         }
     }
