@@ -30,26 +30,11 @@ use httparse;
 use netbuf;
 
 
-struct HttpClientInner {
-    requests: VecDeque<(Request, futures::Complete<Result<Response, io::Error>>)>,
-    task: Option<task::Task>,
-}
 
-impl HttpClientInner {
-    pub fn new() -> HttpClientInner {
-        HttpClientInner {
-            requests: VecDeque::new(),
-            task: None,
-        }
-    }
-}
-
-impl Default for HttpClientInner {
-    fn default() -> HttpClientInner {
-        HttpClientInner::new()
-    }
-}
-
+/// A pipelining HTTP client based on a single connetion.
+///
+/// If the connection dies any pending requests are cancelled, but the client will attempt to
+/// reconnect.
 pub struct HttpClient {
     inner: Arc<Mutex<HttpClientInner>>,
 }
@@ -94,6 +79,27 @@ impl HttpClient {
         }
 
         o.into()
+    }
+}
+
+
+struct HttpClientInner {
+    requests: VecDeque<(Request, futures::Complete<Result<Response, io::Error>>)>,
+    task: Option<task::Task>,
+}
+
+impl HttpClientInner {
+    pub fn new() -> HttpClientInner {
+        HttpClientInner {
+            requests: VecDeque::new(),
+            task: None,
+        }
+    }
+}
+
+impl Default for HttpClientInner {
+    fn default() -> HttpClientInner {
+        HttpClientInner::new()
     }
 }
 
