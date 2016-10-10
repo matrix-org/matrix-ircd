@@ -31,6 +31,8 @@ use serde::{Serialize, Deserialize};
 
 use http::{Request, HttpClient};
 
+use rand::{thread_rng, Rng};
+
 
 pub mod protocol;
 mod models;
@@ -49,7 +51,7 @@ pub struct MatrixClient {
     access_token: String,
     sync_client: sync::MatrixSyncClient,
     rooms: BTreeMap<String, Room>,
-    http_stream: HttpClient
+    http_stream: HttpClient,
 }
 
 impl MatrixClient {
@@ -81,7 +83,7 @@ impl MatrixClient {
 
         let mut http_stream = HttpClient::new(host, port, tls, handle.clone());
 
-        do_json_post(&mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
+        do_json_post("POST", &mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
             user: user,
             password: password,
             login_type: "m.login.password".into(),
@@ -101,12 +103,13 @@ impl MatrixClient {
     }
 
     pub fn send_text_message(&mut self, room_id: &str, body: String) -> impl Future<Item=protocol::RoomSendResponse, Error=io::Error> {
-        let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message", room_id)).unwrap();
+        let msg_id = thread_rng().gen::<u16>();
+        let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message/mircd-{}", room_id, msg_id)).unwrap();
         url.query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token);
 
-        do_json_post(&mut self.http_stream, &url, &protocol::RoomSendInput {
+        do_json_post("PUT", &mut self.http_stream, &url, &protocol::RoomSendInput {
             body: body,
             msgtype: "m.text".into(),
         })
@@ -118,13 +121,19 @@ impl MatrixClient {
     }
 
     fn poll_sync(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
-        let resp = try_ready!(self.sync_client.poll());
-        if let Some(ref sync_response) = resp {
-            for (room_id, sync) in &sync_response.rooms.join {
+        let mut resp = try_ready!(self.sync_client.poll());
+        if let Some(ref mut sync_response) = resp {
+            for (room_id, sync) in &mut sync_response.rooms.join {
+                sync.timeline.events.retain(|ev| {
+                    !ev.unsigned.transaction_id.as_ref().map(|txn_id| txn_id.starts_with("mircd-")).unwrap_or(false)
+                });
+
                 if let Some(mut room) = self.rooms.get_mut(room_id) {
                     room.update_from_sync(sync);
-                    continue
+                    continue;
                 }
+
+                // We can't put this in an else because of the mutable borrow in the if condition.
                 self.rooms.insert(room_id.clone(), Room::from_sync(room_id.clone(), sync));
             }
         }
@@ -134,11 +143,11 @@ impl MatrixClient {
 }
 
 
-fn do_json_post<I: Serialize, O: Deserialize>(stream: &mut HttpClient, url: &Url, input: &I)
+fn do_json_post<I: Serialize, O: Deserialize>(method: &'static str, stream: &mut HttpClient, url: &Url, input: &I)
     -> impl Future<Item=O, Error=JsonPostError>
 {
     stream.send_request(Request {
-        method: "POST",
+        method: method,
         path: format!("{}?{}", url.path(), url.query().unwrap_or("")),
         headers: vec![("Content-Type".into(), "application/json".into())],
         body: serde_json::to_vec(input).expect("input to be valid json"),

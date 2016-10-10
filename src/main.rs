@@ -41,6 +41,7 @@ extern crate openssl;
 extern crate clap;
 extern crate httparse;
 extern crate netbuf;
+extern crate rand;
 
 
 use clap::{Arg, App};

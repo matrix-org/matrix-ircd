@@ -55,8 +55,13 @@ pub struct Event {
     pub etype: String,
     pub state_key: Option<String>,
     pub content: serde_json::Value,
+    pub unsigned: EventUnsigned,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct EventUnsigned {
+    pub transaction_id: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LoginPasswordInput {
