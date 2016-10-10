@@ -16,6 +16,7 @@ use futures::{self, Async, Future, Poll, task};
 
 use std::collections::VecDeque;
 use std::{mem, io, str};
+use std::io::Read;
 use std::io::Write;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -149,36 +150,104 @@ enum ConnectionState<T: Io> {
 }
 
 
-
 #[must_use = "http stream must be polled"]
 struct HttpClientHandler<T: Io> {
     inner: Arc<Mutex<HttpClientInner>>,
-    response_buffer: netbuf::Buf,
     write_buffer: netbuf::Buf,
-    curr_state: HttpStreamState,
-    partial_response: Response,
     requests: VecDeque<futures::Complete<Result<Response, io::Error>>>,
     stream: T,
     host: String,
+    client_reader: HttpParser,
 }
 
 impl<T: Io> HttpClientHandler<T> {
     pub fn new(inner: Arc<Mutex<HttpClientInner>>, host: String, stream: T) -> HttpClientHandler<T> {
         HttpClientHandler {
             inner: inner,
-            response_buffer: netbuf::Buf::new(),
             write_buffer: netbuf::Buf::new(),
-            curr_state: HttpStreamState::Headers,
-            partial_response: Response::default(),
             requests: VecDeque::new(),
             stream: stream,
             host: host,
+            client_reader: HttpParser::new(),
         }
     }
 
-    fn poll_for_response(&mut self) -> Poll<Response, io::Error> {
-        let mut stream = &mut self.stream;
+    fn write_request(&mut self, request: Request) {
+        write!(self.write_buffer, "{} {} HTTP/1.1\r\n", request.method, request.path).unwrap();
+        write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
+        write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
+        write!(self.write_buffer, "Content-Length: {}\r\n", request.body.len()).unwrap();
+        for &(ref name, ref value) in &request.headers {
+            write!(self.write_buffer, "{}: {}\r\n", name, value).unwrap();
+        }
+        write!(self.write_buffer, "\r\n").unwrap();
+        self.write_buffer.extend(&request.body[..]);
+    }
 
+    fn poll_inner(&mut self) -> Poll<(), io::Error> {
+        loop {
+            let new_requests = {
+                let mut inner = self.inner.lock().expect("lock is poisoned");
+                if inner.task.is_none() {
+                    inner.task = Some(task::park());
+                }
+
+                mem::replace(&mut inner.requests, VecDeque::new())
+            };
+
+            for (req, future) in new_requests {
+                self.write_request(req);
+                self.requests.push_back(future);
+            }
+
+            if !self.write_buffer.is_empty() {
+                self.write_buffer.write_to(&mut self.stream)?;
+            }
+
+            let resp = try_ready!(self.client_reader.poll_for_response(&mut self.stream));
+            if let Some(future) = self.requests.pop_front() {
+                future.complete(Ok(resp));
+            } else {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Response without request"));
+            }
+        }
+    }
+}
+
+
+impl<T: Io> Future for HttpClientHandler<T> {
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<(), io::Error> {
+        match self.poll_inner() {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                for f in self.requests.drain(..) {
+                    f.complete(Err(clone_io_error(&e)));
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+pub struct HttpParser {
+    response_buffer: netbuf::Buf,
+    curr_state: HttpStreamState,
+    partial_response: Response,
+}
+
+impl HttpParser {
+    fn new() -> HttpParser {
+        HttpParser {
+            response_buffer: netbuf::Buf::new(),
+            curr_state: HttpStreamState::Headers,
+            partial_response: Response::default(),
+        }
+    }
+
+    fn poll_for_response<T: Read>(&mut self, stream: &mut T) -> Poll<Response, io::Error> {
         loop {
             match self.curr_state {
                 HttpStreamState::Headers => {
@@ -304,65 +373,6 @@ impl<T: Io> HttpClientHandler<T> {
             }
         }
     }
-
-    fn write_request(&mut self, request: Request) {
-        write!(self.write_buffer, "{} {} HTTP/1.1\r\n", request.method, request.path).unwrap();
-        write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
-        write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
-        write!(self.write_buffer, "Content-Length: {}\r\n", request.body.len()).unwrap();
-        for &(ref name, ref value) in &request.headers {
-            write!(self.write_buffer, "{}: {}\r\n", name, value).unwrap();
-        }
-        write!(self.write_buffer, "\r\n").unwrap();
-        self.write_buffer.extend(&request.body[..]);
-    }
-
-    fn poll_inner(&mut self) -> Poll<(), io::Error> {
-        loop {
-            let new_requests = {
-                let mut inner = self.inner.lock().expect("lock is poisoned");
-                if inner.task.is_none() {
-                    inner.task = Some(task::park());
-                }
-
-                mem::replace(&mut inner.requests, VecDeque::new())
-            };
-
-            for (req, future) in new_requests {
-                self.write_request(req);
-                self.requests.push_back(future);
-            }
-
-            if !self.write_buffer.is_empty() {
-                self.write_buffer.write_to(&mut self.stream)?;
-            }
-
-            let resp = try_ready!(self.poll_for_response());
-            if let Some(future) = self.requests.pop_front() {
-                future.complete(Ok(resp));
-            } else {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Response without request"));
-            }
-        }
-    }
-}
-
-
-impl<T: Io> Future for HttpClientHandler<T> {
-    type Item = ();
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        match self.poll_inner() {
-            Ok(r) => Ok(r),
-            Err(e) => {
-                for f in self.requests.drain(..) {
-                    f.complete(Err(clone_io_error(&e)));
-                }
-                Err(e)
-            }
-        }
-    }
 }
 
 fn clone_io_error(err: &io::Error) -> io::Error {
@@ -467,10 +477,10 @@ mod tests {
 
     #[test]
     fn basic_response() {
-        let test_resp = Cursor::new(b"HTTP/1.1 200 Ok\r\n\r\n");
-        let mut stream = HttpStream::new(test_resp);
+        let mut test_resp = Cursor::new(b"HTTP/1.1 200 Ok\r\n\r\n");
+        let mut stream = HttpParser::new();
 
-        let resp = match stream.poll_for_response().unwrap() {
+        let resp = match stream.poll_for_response(&mut test_resp).unwrap() {
             Async::Ready(resp) => resp,
             c => panic!("Unexpected res: {:?}", c),
         };
@@ -482,10 +492,10 @@ mod tests {
 
     #[test]
     fn basic_length_response() {
-        let test_resp = Cursor::new(b"HTTP/1.1 200 Ok\r\nContent-Length: 5\r\n\r\nHello".to_vec());
-        let mut stream = HttpStream::new(test_resp);
+        let mut test_resp = Cursor::new(b"HTTP/1.1 200 Ok\r\nContent-Length: 5\r\n\r\nHello".to_vec());
+        let mut stream = HttpParser::new();
 
-        let resp = match stream.poll_for_response().unwrap() {
+        let resp = match stream.poll_for_response(&mut test_resp).unwrap() {
             Async::Ready(resp) => resp,
             c => panic!("Unexpected res: {:?}", c),
         };
@@ -494,18 +504,18 @@ mod tests {
         assert_eq!(resp.content_type, None);
         assert_eq!(&resp.data[..], b"Hello");
 
-        assert!(stream.poll_for_response().is_err());
+        assert!(stream.poll_for_response(&mut test_resp).is_err());
     }
 
     #[test]
     fn basic_chunked_response() {
-        let test_resp = Cursor::new(
+        let mut test_resp = Cursor::new(
             b"HTTP/1.1 200 Ok\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nH\r\n4\r\nello\r\n0\r\n\r\n"
             .to_vec()
         );
-        let mut stream = HttpStream::new(test_resp);
+        let mut stream = HttpParser::new();
 
-        let resp = match stream.poll_for_response().unwrap() {
+        let resp = match stream.poll_for_response(&mut test_resp).unwrap() {
             Async::Ready(resp) => resp,
             c => panic!("Unexpected res: {:?}", c),
         };
@@ -517,14 +527,14 @@ mod tests {
 
     #[test]
     fn chunked_response_missing_last_newline() {
-        let test_resp = TestReader::new(vec![
+        let mut test_resp = TestReader::new(vec![
             Some(&b"HTTP/1.1 200 Ok\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nH\r\n4\r\nello\r\n0\r\n\r"[..]),
             Some(b"\n")
         ]);
 
-        let mut stream = HttpStream::new(test_resp);
+        let mut stream = HttpParser::new();
 
-        let resp = match stream.poll_for_response().unwrap() {
+        let resp = match stream.poll_for_response(&mut test_resp).unwrap() {
             Async::Ready(resp) => resp,
             c => panic!("Unexpected res: {:?}", c),
         };
@@ -536,7 +546,7 @@ mod tests {
 
     #[test]
     fn chunked_response_slow() {
-        let test_resp = TestReader::new(vec![
+        let mut test_resp = TestReader::new(vec![
             Some(&b"HTTP/1.1 200 Ok"[..]),
             Some(b"\r\nTransfer-Encoding: chunked\r\n\r"),
             Some(b"\n1\r\nH\r\n4\r"),
@@ -544,9 +554,9 @@ mod tests {
             Some(b"\n")
         ]);
 
-        let mut stream = HttpStream::new(test_resp);
+        let mut stream = HttpParser::new();
 
-        let resp = match stream.poll_for_response().unwrap() {
+        let resp = match stream.poll_for_response(&mut test_resp).unwrap() {
             Async::Ready(resp) => resp,
             c => panic!("Unexpected res: {:?}", c),
         };
@@ -558,7 +568,7 @@ mod tests {
 
     #[test]
     fn chunked_response_slow_block() {
-        let test_resp = TestReader::new(vec![
+        let mut test_resp = TestReader::new(vec![
             Some(&b"HTTP/1.1 200 Ok"[..]),
             None,
             Some(b"\r\nTransfer-Encoding: chunked\r\n\r"),
@@ -570,10 +580,10 @@ mod tests {
             Some(b"\n")
         ]);
 
-        let mut stream = HttpStream::new(test_resp);
+        let mut stream = HttpParser::new();
 
         loop {
-            match stream.poll_for_response().unwrap() {
+            match stream.poll_for_response(&mut test_resp).unwrap() {
                 Async::Ready(resp) => {
                     assert_eq!(resp.code, 200);
                     assert_eq!(resp.content_type, None);
@@ -587,12 +597,12 @@ mod tests {
 
     #[test]
     fn mutliple() {
-        let test_resp = Cursor::new(b"HTTP/1.1 200 Ok\r\nContent-Length: 5\r\n\r\nHelloHTTP/1.1 200 Ok\r\nContent-Length: 5\r\n\r\nHello".to_vec());
+        let mut test_resp = Cursor::new(b"HTTP/1.1 200 Ok\r\nContent-Length: 5\r\n\r\nHelloHTTP/1.1 200 Ok\r\nContent-Length: 5\r\n\r\nHello".to_vec());
 
-        let mut stream = HttpStream::new(test_resp);
+        let mut stream = HttpParser::new();
 
         for _ in &[0, 1] {
-            let resp = match stream.poll_for_response().unwrap() {
+            let resp = match stream.poll_for_response(&mut test_resp).unwrap() {
                 Async::Ready(resp) => resp,
                 c => panic!("Unexpected res: {:?}", c),
             };
