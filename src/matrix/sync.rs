@@ -79,12 +79,17 @@ impl MatrixSyncClient {
                     continue
                 };
 
-                let response = match current_sync.poll().expect("sync future unexpectedly cancelled") {
-                    Async::Ready(r) => r,
-                    Async::NotReady => {
+                let response = match current_sync.poll() {
+                    Ok(Async::Ready(r)) => r,
+                    Ok(Async::NotReady) => {
                         self.current_sync = Some(current_sync);
                         return Ok(Async::NotReady)
                     },
+                    Err(e) => {
+                        task_info!("Error doing sync"; "error" => format!("{}", e));
+                        self.current_sync = None;
+                        continue;
+                    }
                 };
 
                 if response.code != 200 {

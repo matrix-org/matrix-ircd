@@ -31,7 +31,6 @@ use netbuf;
 struct HttpClientInner {
     requests: VecDeque<(Request, futures::Complete<Result<Response, io::Error>>)>,
     task: Option<task::Task>,
-    connection_state: ConnectionState,
 }
 
 impl HttpClientInner {
@@ -39,7 +38,6 @@ impl HttpClientInner {
         HttpClientInner {
             requests: VecDeque::new(),
             task: None,
-            connection_state: ConnectionState::Closed,
         }
     }
 }
@@ -52,26 +50,26 @@ impl Default for HttpClientInner {
 
 pub struct HttpClient {
     inner: Arc<Mutex<HttpClientInner>>,
-    host: String,
-    port: u16,
-    handle: Handle,
 }
 
 impl HttpClient {
     pub fn new(host: String, port: u16, handle: Handle) -> HttpClient {
         let inner: Arc<Mutex<HttpClientInner>> = Arc::default();
 
+        let host_clone = host.clone();
+
+        ReconnectingStream::spawn(handle, inner.clone(), host.clone(), Box::new(move |handle| {
+            tcp_connect(
+                (host_clone.as_str(), port), handle.remote().clone()
+            )
+        }));
+
         HttpClient {
             inner: inner,
-            host: host,
-            port: port,
-            handle: handle,
         }
     }
 
     pub fn send_request(&mut self, request: Request) -> HttpResponseFuture {
-        self.maybe_start_connection();
-
         let mut inner = self.inner.lock().expect("lock is poisoned");
 
         let (c, o) = futures::oneshot();
@@ -83,30 +81,73 @@ impl HttpClient {
 
         o.into()
     }
+}
 
-    fn maybe_start_connection(&mut self) {
-        {
-            let mut inner = self.inner.lock().expect("http client lock was poisoned");
-            if let ConnectionState::Connected = inner.connection_state {
-                return
-            }
-            inner.connection_state = ConnectionState::Connected;
-        }
 
-        let inner_clone = self.inner.clone();
-        let host_clone = self.host.clone();
+struct ReconnectingStream<T: Io, F> {
+    inner: Arc<Mutex<HttpClientInner>>,
+    connection_state: ConnectionState<T>,
+    reconnect_func: Box<FnMut(&mut Handle) -> F>,
+    host: String,
+    handle: Handle,
+}
 
-        let tcp = tcp_connect(
-            (self.host.as_str(), self.port), self.handle.remote().clone()
-        ).and_then(move |socket| {
-            HttpClientHandler::new(inner_clone, host_clone, socket)
-        }).map_err(|_| {
-            // TODO: Handle error better
+
+impl<T, F> ReconnectingStream<T, F> where T: Io + 'static, F: Future<Item=T, Error=io::Error> + 'static {
+    pub fn spawn(mut handle: Handle, inner: Arc<Mutex<HttpClientInner>>, host: String, mut reconnect_func: Box<FnMut(&mut Handle) -> F>) {
+        let conn_state = ConnectionState::Connecting { future: Box::new((reconnect_func)(&mut handle)) };
+        handle.spawn(ReconnectingStream {
+            inner: inner,
+            connection_state: conn_state,
+            reconnect_func: reconnect_func,
+            handle: handle.clone(),
+            host: host,
         });
-
-        self.handle.spawn(tcp);
     }
 }
+
+impl<T, F> Future for ReconnectingStream<T, F> where T: Io, F: Future<Item=T, Error=io::Error> + 'static {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        loop {
+            self.connection_state = match self.connection_state {
+                ConnectionState::Connected { ref mut handler } => {
+                    match handler.poll() {
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Ok(Async::Ready(())) | Err(_) => {
+                            // TODO: Backoff and log
+                            ConnectionState::Connecting { future: Box::new((self.reconnect_func)(&mut self.handle)) }
+                        }
+                    }
+                }
+                ConnectionState::Connecting { ref mut future } => {
+                    match future.poll() {
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Ok(Async::Ready(stream)) => {
+                             ConnectionState::Connected {
+                                 handler: HttpClientHandler::new(self.inner.clone(), self.host.clone(), stream)
+                             }
+                        }
+                        Err(_) => {
+                            // TODO: Backoff and log
+                            ConnectionState::Connecting { future: Box::new((self.reconnect_func)(&mut self.handle)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+enum ConnectionState<T: Io> {
+    Connected { handler: HttpClientHandler<T> },
+    Connecting { future: Box<Future<Item=T, Error=io::Error>> }
+}
+
 
 
 #[must_use = "http stream must be polled"]
@@ -307,13 +348,6 @@ impl<T: Io> HttpClientHandler<T> {
 }
 
 
-impl<T: Io> Drop for HttpClientHandler<T> {
-    fn drop(&mut self) {
-        let mut inner = self.inner.lock().expect("lock is poisoned");
-        inner.connection_state = ConnectionState::Closed;
-    }
-}
-
 impl<T: Io> Future for HttpClientHandler<T> {
     type Item = ();
     type Error = io::Error;
@@ -322,8 +356,6 @@ impl<T: Io> Future for HttpClientHandler<T> {
         match self.poll_inner() {
             Ok(r) => Ok(r),
             Err(e) => {
-                // TODO: Should we notify that thing has finished?
-
                 for f in self.requests.drain(..) {
                     f.complete(Err(clone_io_error(&e)));
                 }
@@ -397,8 +429,6 @@ fn read_into_vec<R: io::Read>(stream: &mut R, buf: &mut netbuf::Buf) -> Poll<usi
     Ok(Async::Ready(size))
 }
 
-
-enum ConnectionState { Closed, Connected }
 
 
 #[cfg(test)]
