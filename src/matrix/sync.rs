@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{self, Async, Future, Poll};
+use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
 use serde_json;
@@ -25,14 +25,14 @@ use tokio_core::reactor::Handle;
 
 use url::Url;
 
-use http::{Request, Response, HttpStream, HttpResponseFuture};
+use http::{Request, HttpClient, HttpResponseFuture};
 
 
 pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
     next_token: Option<String>,
-    http_stream: HttpStream,
+    http_stream: HttpClient,
     current_sync: Option<HttpResponseFuture>,
 }
 
@@ -45,7 +45,7 @@ impl MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token: access_token,
             next_token: None,
-            http_stream: HttpStream::new(host.into(), port, handle),
+            http_stream: HttpClient::new(host.into(), port, handle),
             current_sync: None,
         }
     }
@@ -70,7 +70,7 @@ impl MatrixSyncClient {
                         self.url.query_pairs_mut().append_pair("since", token);
                     }
 
-                    self.current_sync = Some(http_stream.send_request(&Request {
+                    self.current_sync = Some(http_stream.send_request(Request {
                         method: "GET",
                         path: format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
                         headers: vec![],
@@ -78,8 +78,6 @@ impl MatrixSyncClient {
                     }));
                     continue
                 };
-
-                http_stream.poll()?;
 
                 let response = match current_sync.poll().expect("sync future unexpectedly cancelled") {
                     Async::Ready(r) => r,

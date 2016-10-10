@@ -12,153 +12,94 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{self, Async, Future, Poll};
+use futures::{self, Async, Future, Poll, task};
 
 use std::collections::VecDeque;
 use std::{mem, io, str};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use tokio_core::reactor::Handle;
-use tokio_core::net::TcpStream;
+use tokio_core::io::Io;
 use tokio_dns::tcp_connect;
 
 use httparse;
 use netbuf;
 
 
-enum ConnectionState<T: Read + Write> {
-    Connected(T),
-    Connecting(Box<Future<Item=T, Error=io::Error>>),
+#[derive(Default)]
+struct HttpClientInner {
+    requests: VecDeque<(Request, futures::Complete<Result<Response, io::Error>>)>,
+    task: Option<task::Task>,
+    errored: bool,
 }
 
-impl<T: Read + Write> ConnectionState<T> {
-    pub fn poll(&mut self) -> Poll<&mut T, io::Error> {
-        let socket = match *self {
-            ConnectionState::Connecting(ref mut future)  => {
-                try_ready!(future.poll())
-            }
-            ConnectionState::Connected(ref mut stream) => return Ok(Async::Ready(stream)),
-        };
-
-        *self = ConnectionState::Connected(socket);
-
-        self.poll()
-    }
+pub struct HttpClient {
+    inner: Arc<Mutex<HttpClientInner>>,
 }
 
+impl HttpClient {
+    pub fn new(host: String, port: u16, handle: Handle) -> HttpClient {
+        let inner: Arc<Mutex<HttpClientInner>> = Arc::default();
+        let inner_handle = inner.clone();
 
+        let tcp = tcp_connect(
+            (host.as_str(), port), handle.remote().clone()
+        ).and_then(move |socket| {
+            HttpClientHandler::new(inner_handle, host, socket)
+        }).map_err(|_| ()); // TODO: Handle error better
 
-pub struct HttpResponseFuture {
-    future: futures::Oneshot<Result<Response, io::Error>>,
-}
+        handle.spawn(tcp);
 
-impl Future for HttpResponseFuture {
-    type Item = Response;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Response, io::Error> {
-        match self.future.poll() {
-            Ok(Async::Ready(Ok(response))) => Ok(Async::Ready(response)),
-            Ok(Async::Ready(Err(e))) => Err(e),
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "stream went away")),
+        HttpClient {
+            inner: inner,
         }
     }
-}
 
-impl From<futures::Oneshot<Result<Response, io::Error>>> for HttpResponseFuture {
-    fn from(future: futures::Oneshot<Result<Response, io::Error>>) -> HttpResponseFuture {
-        HttpResponseFuture { future: future }
+    pub fn send_request(&mut self, request: Request) -> HttpResponseFuture {
+        let mut inner = self.inner.lock().expect("lock is poisoned");
+
+        let (c, o) = futures::oneshot();
+        inner.requests.push_back((request, c));
+
+        if let Some(ref mut task) = inner.task {
+            task.unpark();
+        }
+
+        o.into()
     }
 }
 
 
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Response {
-    pub code: u16,
-    pub content_type: Option<String>,
-    pub data: Vec<u8>,
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Request {
-    pub method: &'static str,
-    pub path: String,
-    pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
-}
-
-
-#[derive(Debug, Clone, Copy)]
-enum HttpStreamState {
-    Headers,
-    RawData(Option<usize>),
-    ChunkedData,
-}
-
 #[must_use = "http stream must be polled"]
-pub struct HttpStream {
+struct HttpClientHandler<T: Io> {
+    inner: Arc<Mutex<HttpClientInner>>,
     response_buffer: netbuf::Buf,
     write_buffer: netbuf::Buf,
     curr_state: HttpStreamState,
     partial_response: Response,
     requests: VecDeque<futures::Complete<Result<Response, io::Error>>>,
-    connection_state: ConnectionState<TcpStream>,
+    stream: T,
     host: String,
 }
 
-impl HttpStream {
-    pub fn new(host: String, port: u16, handle: Handle) -> HttpStream {
-        let tcp = tcp_connect((host.as_str(), port), handle.remote().clone()).boxed();
-
-        HttpStream {
+impl<T: Io> HttpClientHandler<T> {
+    pub fn new(inner: Arc<Mutex<HttpClientInner>>, host: String, stream: T) -> HttpClientHandler<T> {
+        HttpClientHandler {
+            inner: inner,
             response_buffer: netbuf::Buf::new(),
             write_buffer: netbuf::Buf::new(),
             curr_state: HttpStreamState::Headers,
             partial_response: Response::default(),
             requests: VecDeque::new(),
-            connection_state: ConnectionState::Connecting(tcp),
+            stream: stream,
             host: host,
         }
     }
 
-    pub fn send_request(&mut self, request: &Request) -> HttpResponseFuture {
-        write!(self.write_buffer, "{} {} HTTP/1.1\r\n", request.method, request.path).unwrap();
-        write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
-        write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
-        write!(self.write_buffer, "Content-Length: {}\r\n", request.body.len()).unwrap();
-        for &(ref name, ref value) in &request.headers {
-            write!(self.write_buffer, "{}: {}\r\n", name, value).unwrap();
-        }
-        write!(self.write_buffer, "\r\n").unwrap();
-        self.write_buffer.extend(&request.body[..]);
-
-        let (c, o) = futures::oneshot();
-
-        self.requests.push_back(c);
-
-        o.into()
-    }
-
-    pub fn poll(&mut self) -> Poll<(), io::Error> {
-        loop {
-            if !self.write_buffer.is_empty() {
-                let mut stream = try_ready!(self.connection_state.poll());
-                self.write_buffer.write_to(stream)?;
-            }
-
-            let resp = try_ready!(self.poll_for_response());
-            if let Some(future) = self.requests.pop_front() {
-                future.complete(Ok(resp));
-            } else {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Response without request"));
-            }
-        }
-    }
-
     fn poll_for_response(&mut self) -> Poll<Response, io::Error> {
-        let mut stream = try_ready!(self.connection_state.poll());
+        let mut stream = &mut self.stream;
 
         loop {
             match self.curr_state {
@@ -285,14 +226,143 @@ impl HttpStream {
             }
         }
     }
+
+    fn write_request(&mut self, request: Request) {
+        write!(self.write_buffer, "{} {} HTTP/1.1\r\n", request.method, request.path).unwrap();
+        write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
+        write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
+        write!(self.write_buffer, "Content-Length: {}\r\n", request.body.len()).unwrap();
+        for &(ref name, ref value) in &request.headers {
+            write!(self.write_buffer, "{}: {}\r\n", name, value).unwrap();
+        }
+        write!(self.write_buffer, "\r\n").unwrap();
+        self.write_buffer.extend(&request.body[..]);
+    }
+
+    fn poll_inner(&mut self) -> Poll<(), io::Error> {
+        loop {
+            let new_requests = {
+                let mut inner = self.inner.lock().expect("lock is poisoned");
+                if inner.task.is_none() {
+                    inner.task = Some(task::park());
+                }
+
+                mem::replace(&mut inner.requests, VecDeque::new())
+            };
+
+            for (req, future) in new_requests {
+                self.write_request(req);
+                self.requests.push_back(future);
+            }
+
+            if !self.write_buffer.is_empty() {
+                self.write_buffer.write_to(&mut self.stream)?;
+            }
+
+            let resp = try_ready!(self.poll_for_response());
+            if let Some(future) = self.requests.pop_front() {
+                future.complete(Ok(resp));
+            } else {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Response without request"));
+            }
+        }
+    }
 }
 
+
+impl<T: Io> Drop for HttpClientHandler<T> {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().expect("lock is poisoned");
+        inner.errored = true;
+    }
+}
+
+impl<T: Io> Future for HttpClientHandler<T> {
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<(), io::Error> {
+        match self.poll_inner() {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                {
+                    let mut inner = self.inner.lock().expect("lock is poisoned");
+                    inner.errored = true;
+                }
+
+                for f in self.requests.drain(..) {
+                    f.complete(Err(clone_io_error(&e)));
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+fn clone_io_error(err: &io::Error) -> io::Error {
+    let kind = err.kind();
+    if let Some(inner) = err.get_ref() {
+        io::Error::new(kind, inner.description().to_string())
+    } else {
+        io::Error::new(kind, "")
+    }
+}
+
+
+pub struct HttpResponseFuture {
+    future: futures::Oneshot<Result<Response, io::Error>>,
+}
+
+impl Future for HttpResponseFuture {
+    type Item = Response;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Response, io::Error> {
+        match self.future.poll() {
+            Ok(Async::Ready(Ok(response))) => Ok(Async::Ready(response)),
+            Ok(Async::Ready(Err(e))) => Err(e),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "stream went away")),
+        }
+    }
+}
+
+impl From<futures::Oneshot<Result<Response, io::Error>>> for HttpResponseFuture {
+    fn from(future: futures::Oneshot<Result<Response, io::Error>>) -> HttpResponseFuture {
+        HttpResponseFuture { future: future }
+    }
+}
+
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Response {
+    pub code: u16,
+    pub content_type: Option<String>,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Request {
+    pub method: &'static str,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+
+#[derive(Debug, Clone, Copy)]
+enum HttpStreamState {
+    Headers,
+    RawData(Option<usize>),
+    ChunkedData,
+}
 
 
 fn read_into_vec<R: io::Read>(stream: &mut R, buf: &mut netbuf::Buf) -> Poll<usize, io::Error> {
     let size = try_nb!(buf.read_from(stream));
     Ok(Async::Ready(size))
 }
+
 
 #[cfg(test)]
 mod tests {

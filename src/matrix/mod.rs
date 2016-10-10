@@ -29,7 +29,7 @@ use url::Url;
 use serde_json;
 use serde::{Serialize, Deserialize};
 
-use http::{Request, HttpStream};
+use http::{Request, HttpClient};
 
 
 pub mod protocol;
@@ -49,11 +49,11 @@ pub struct MatrixClient {
     access_token: String,
     sync_client: sync::MatrixSyncClient,
     rooms: BTreeMap<String, Room>,
-    http_stream: HttpStream
+    http_stream: HttpClient
 }
 
 impl MatrixClient {
-    pub fn new(handle: Handle, http_stream: HttpStream, base_url: &Url, user_id: String, access_token: String) -> MatrixClient {
+    pub fn new(handle: Handle, http_stream: HttpClient, base_url: &Url, user_id: String, access_token: String) -> MatrixClient {
         MatrixClient {
             url: base_url.clone(),
             user_id: user_id,
@@ -74,9 +74,9 @@ impl MatrixClient {
         let host = base_url.host_str().expect("expected host in base_url").to_string();
         let port = base_url.port_or_known_default().unwrap();
 
-        let mut http_stream = HttpStream::new(host, port, handle.clone());
+        let mut http_stream = HttpClient::new(host, port, handle.clone());
 
-        let future = do_json_post(&mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
+        do_json_post(&mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
             user: user,
             password: password,
             login_type: "m.login.password".into(),
@@ -90,11 +90,7 @@ impl MatrixClient {
                     io::Error::new(io::ErrorKind::Other, format!("Got {} response", code))
                 )
             }
-        });
-
-        WrappedHttp::new(
-            future, http_stream
-        ).map(move |(http_stream, response): (HttpStream, protocol::LoginResponse)| {
+        }).map(move |response: protocol::LoginResponse| {
             MatrixClient::new(handle, http_stream, &base_url, response.user_id, response.access_token)
         })
     }
@@ -133,16 +129,16 @@ impl MatrixClient {
 }
 
 
-fn do_json_post<I: Serialize, O: Deserialize>(stream: &mut HttpStream, url: &Url, input: &I)
+fn do_json_post<I: Serialize, O: Deserialize>(stream: &mut HttpClient, url: &Url, input: &I)
     -> impl Future<Item=O, Error=JsonPostError>
 {
-    stream.send_request(&Request {
+    stream.send_request(Request {
         method: "POST",
         path: format!("{}?{}", url.path(), url.query().unwrap_or("")),
         headers: vec![("Content-Type".into(), "application/json".into())],
         body: serde_json::to_vec(input).expect("input to be valid json"),
     })
-    .map_err(|_| io::Error::new(io::ErrorKind::Other, "request future unexpectedly cancelled").into())
+    .map_err(|e| e.into())
     .and_then(move |resp| {
         if resp.code != 200 {
             return Err(JsonPostError::ErrorRepsonse(resp.code));
@@ -203,46 +199,6 @@ impl Stream for MatrixClient {
 
     fn poll(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
         task_trace!("Polled matrix client");
-        self.http_stream.poll()?;
         self.poll_sync()
-    }
-}
-
-
-
-struct WrappedHttp<T, E> {
-    future: Box<Future<Item=T, Error=E>>,
-    http_stream: Option<HttpStream>,
-}
-
-impl<T, E> WrappedHttp<T, E> {
-    pub fn new<F: Future<Item=T, Error=E> + 'static>(future: F, http_stream: HttpStream) -> WrappedHttp<T, E> {
-        WrappedHttp {
-            future: Box::new(future),
-            http_stream: Some(http_stream),
-        }
-    }
-}
-
-impl<T, E: From<io::Error>> Future for WrappedHttp<T, E> {
-    type Item = (HttpStream, T);
-    type Error = E;
-
-    fn poll(&mut self) -> Poll<(HttpStream, T), E> {
-        task_trace!("WrappedHttp polled");
-
-        let mut http_stream = self.http_stream.take().expect("WrappedHttp cannot be repolled");
-
-        http_stream.poll()?;
-
-        let res = match self.future.poll()? {
-            Async::Ready(res) => res,
-            Async::NotReady => {
-                self.http_stream = Some(http_stream);
-                return Ok(Async::NotReady);
-            }
-        };
-
-        Ok(Async::Ready((http_stream, res)))
     }
 }
