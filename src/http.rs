@@ -56,11 +56,11 @@ pub struct Response {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Request<'a> {
-    pub method: &'a str,
-    pub path: &'a str,
-    pub headers: &'a [(&'a str, &'a str)],
-    pub body: &'a [u8],
+pub struct Request {
+    pub method: &'static str,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
 }
 
 
@@ -102,11 +102,11 @@ impl HttpStream {
         write!(self.write_buffer, "Host: {}\r\n", &self.host).unwrap();
         write!(self.write_buffer, "Connection: keep-alive\r\n").unwrap();
         write!(self.write_buffer, "Content-Length: {}\r\n", request.body.len()).unwrap();
-        for &(name, value) in request.headers {
+        for &(ref name, ref value) in &request.headers {
             write!(self.write_buffer, "{}: {}\r\n", name, value).unwrap();
         }
         write!(self.write_buffer, "\r\n").unwrap();
-        self.write_buffer.extend(request.body);
+        self.write_buffer.extend(&request.body[..]);
 
         let (c, o) = futures::oneshot();
 

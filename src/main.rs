@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(rustc_macro, question_mark, conservative_impl_trait)]
+#![feature(proc_macro, question_mark, conservative_impl_trait)]
 
 #[macro_use]
 extern crate serde_derive;

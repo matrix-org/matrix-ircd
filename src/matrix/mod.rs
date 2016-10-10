@@ -138,9 +138,9 @@ fn do_json_post<I: Serialize, O: Deserialize>(stream: &mut HttpStream, url: &Url
 {
     stream.send_request(&Request {
         method: "POST",
-        path: &format!("{}?{}", url.path(), url.query().unwrap_or("")),
-        headers: &[("Content-Type", "application/json")],
-        body: &serde_json::to_vec(input).expect("input to be valid json"),
+        path: format!("{}?{}", url.path(), url.query().unwrap_or("")),
+        headers: vec![("Content-Type".into(), "application/json".into())],
+        body: serde_json::to_vec(input).expect("input to be valid json"),
     })
     .map_err(|_| io::Error::new(io::ErrorKind::Other, "request future unexpectedly cancelled").into())
     .and_then(move |resp| {

@@ -72,9 +72,9 @@ impl MatrixSyncClient {
 
                     self.current_sync = Some(http_stream.send_request(&Request {
                         method: "GET",
-                        path: &format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
-                        headers: &[],
-                        body: &[],
+                        path: format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
+                        headers: vec![],
+                        body: vec![],
                     }));
                     continue
                 };
