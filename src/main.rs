@@ -78,12 +78,12 @@ task_local! {
 }
 
 #[macro_use]
-mod macros;
-mod bridge;
-mod irc;
-mod matrix;
-mod stream_fold;
-mod http;
+pub mod macros;
+pub mod bridge;
+pub mod irc;
+pub mod matrix;
+pub mod stream_fold;
+pub mod http;
 
 
 #[derive(Clone)]
