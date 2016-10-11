@@ -137,7 +137,7 @@ fn main() {
         .arg(Arg::with_name("BIND")
             .short("b")
             .long("bind")
-            .help("Sets the address to bind to")
+            .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
             .takes_value(true)
             .validator(|addr| {
                 addr.parse::<SocketAddr>()
