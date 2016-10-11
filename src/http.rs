@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! A tokio based HTTP client.
+
 use futures::{self, Async, Future, Poll, task};
 
 use std::collections::VecDeque;

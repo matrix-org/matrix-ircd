@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This main module responsible for keeping track of the Matrix side of the world.
+//! The main module responsible for keeping track of the Matrix side of the world.
 //!
 //! It knows nothing about IRC.
 

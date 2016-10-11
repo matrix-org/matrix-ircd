@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-//! This main module responsible for keeping track of IRC Matrix side of the world.
+//! The main module responsible for keeping track of IRC Matrix side of the world.
 //!
 //! It knows nothing about Matrix.
 

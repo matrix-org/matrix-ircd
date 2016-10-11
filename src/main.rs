@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
+//! directly with a Matrix home server.
+
 #![feature(proc_macro, question_mark, conservative_impl_trait)]
 
 #[macro_use]
@@ -74,8 +77,10 @@ lazy_static! {
 
 
 task_local! {
+    // A task local context describing the connection (from an IRC client).
     static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
 }
+
 
 #[macro_use]
 pub mod macros;
@@ -86,6 +91,7 @@ pub mod stream_fold;
 pub mod http;
 
 
+/// A task local context describing the connection (from an IRC client).
 #[derive(Clone)]
 pub struct ConnectionContext {
     logger: slog::Logger,

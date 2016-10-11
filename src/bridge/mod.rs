@@ -36,7 +36,10 @@ use tokio_core::io::Io;
 use tokio_core::reactor::Handle;
 use url::Url;
 
-
+/// Bridges a single IRC connection with a matrix session.
+///
+/// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
+/// on unrecoverable error).
 pub struct Bridge<IS: Io> {
     irc_conn: IrcUserConnection<IS>,
     matrix_client: MatrixClient,
