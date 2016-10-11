@@ -74,3 +74,10 @@ cargo clippy --features clippy
 
 The feature flag disables certain spurious warnings related to third party
 crates.
+
+
+Development API documentation can be built using:
+
+```
+cargo doc --open
+```
