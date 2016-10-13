@@ -61,6 +61,9 @@ also supported but should *only* be used for testing and development.
 Supplying both `pkey` and `cert` arguments will cause Matrix IRCd to listen
 on TLS, otherwise it will use plain TCP.
 
+The credentials for the matrix account are taken from the user name and server
+password specified by the IRC connection.
+
 
 ## Development
 
