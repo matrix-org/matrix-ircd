@@ -89,6 +89,13 @@ pub struct RoomJoinResponse {
     pub room_id: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RoomLeaveInput {
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoomLeaveResponse {
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RoomSendInput {

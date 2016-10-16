@@ -126,6 +126,15 @@ impl MatrixClient {
         do_json_post("POST", &mut self.http_stream, &url, &protocol::RoomJoinInput { }).map_err(JsonPostError::into_io_error)
     }
 
+    pub fn leave_room(&mut self, room_id: &str) -> impl Future<Item=protocol::RoomLeaveResponse, Error=io::Error> {
+        let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
+        let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/leave", roomid_encoded)).unwrap();
+        url.query_pairs_mut()
+            .clear()
+            .append_pair("access_token", &self.access_token);
+        do_json_post("POST", &mut self.http_stream, &url, &protocol::RoomLeaveInput { }).map_err(JsonPostError::into_io_error)
+    }
+
     pub fn get_room(&self, room_id: &str) -> Option<&Room> {
         self.rooms.get(room_id)
     }
