@@ -106,7 +106,7 @@ impl MatrixClient {
     pub fn send_text_message(&mut self, room_id: &str, body: String) -> impl Future<Item=protocol::RoomSendResponse, Error=io::Error> {
         let msg_id = thread_rng().gen::<u16>();
         let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message/mircd-{}", room_id, msg_id))
-            .unwrap("Unable to construct a valid API url");
+            .expect("Unable to construct a valid API url");
         url.query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token);
@@ -121,7 +121,7 @@ impl MatrixClient {
     pub fn join_room(&mut self, room_id: &str) -> impl Future<Item=protocol::RoomJoinResponse, Error=io::Error> {
         let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
         let mut url = self.url.join(&format!("/_matrix/client/r0/join/{}", roomid_encoded))
-            .unwrap("Unable to construct a valid API url");
+            .expect("Unable to construct a valid API url");
         url.query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token);
