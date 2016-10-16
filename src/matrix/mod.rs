@@ -128,7 +128,8 @@ impl MatrixClient {
 
     pub fn leave_room(&mut self, room_id: &str) -> impl Future<Item=protocol::RoomLeaveResponse, Error=io::Error> {
         let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
-        let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/leave", roomid_encoded)).unwrap();
+        let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/leave", roomid_encoded))
+            .expect("Unable to construct a valid API url");
         url.query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token);
