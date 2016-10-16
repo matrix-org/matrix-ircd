@@ -32,7 +32,7 @@ cargo build --features trace_logging
 ```
 
 
-<sup>1</sup> It is recommended to use a tool such as [rustup](rustup.rs) to
+<sup>1</sup> It is recommended to use a tool such as [rustup](https://www.rustup.rs) to
 manage the rust compiler toolchains.
 
 
