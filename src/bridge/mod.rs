@@ -106,7 +106,14 @@ impl<IS: Io> Bridge<IS> {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }
             }
-            // TODO: Handle JOIN
+            IrcCommand::Join { channel } => {
+                info!(self.ctx.logger, "Joining channel"; "channel" => channel);
+                let logger = self.ctx.logger.clone();
+                self.handle.spawn(
+                    self.matrix_client.join_room(channel.as_str())
+                    .map(|_| ()).map_err(move |err| warn!(logger, "Failed to join: {}", err))
+                );
+            }
             // TODO: Handle PART
             c => {
                 warn!(self.ctx.logger, "Ignoring IRC command"; "command" => c.command());
