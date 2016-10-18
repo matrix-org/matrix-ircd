@@ -36,11 +36,13 @@ use tokio_core::io::Io;
 use tokio_core::reactor::Handle;
 use url::Url;
 
+use tasked_futures::{TaskExecutorQueue, TaskExecutor};
+
 /// Bridges a single IRC connection with a matrix session.
 ///
 /// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
 /// on unrecoverable error).
-pub struct Bridge<IS: Io> {
+pub struct Bridge<IS: Io + 'static> {
     irc_conn: IrcUserConnection<IS>,
     matrix_client: MatrixClient,
     ctx: ConnectionContext,
@@ -48,6 +50,7 @@ pub struct Bridge<IS: Io> {
     mappings: MappingStore,
     handle: Handle,
     is_first_sync: bool,
+    executor_queue: TaskExecutorQueue<Bridge<IS>, io::Error>,
 }
 
 impl<IS: Io> Bridge<IS> {
@@ -69,7 +72,8 @@ impl<IS: Io> Bridge<IS> {
                         closed: false,
                         mappings: MappingStore::default(),
                         handle: handle,
-                        is_first_sync: true
+                        is_first_sync: true,
+                        executor_queue: TaskExecutorQueue::default(),
                     }),
                     Err(LoginError::InvalidPassword) => {
                         user_connection.write_invalid_password();
@@ -86,6 +90,8 @@ impl<IS: Io> Bridge<IS> {
                 let own_user_id = matrix_client.get_user_id().into();
                 mappings.insert_nick(irc_conn, own_nick, own_user_id);
             }
+            bridge.spawn_fn(|bridge| bridge.poll_irc());
+            bridge.spawn_fn(|bridge| bridge.poll_matrix());
             Ok(bridge)
         })
     }
@@ -166,42 +172,35 @@ impl<IS: Io> Bridge<IS> {
             return Ok(Async::NotReady);
         }
 
-        if let Some(line) = try_ready!(self.irc_conn.poll()) {
-            self.handle_irc_cmd(line);
-        } else {
-            self.closed = true;
+        loop {
+            if let Some(line) = try_ready!(self.irc_conn.poll()) {
+                self.handle_irc_cmd(line);
+            } else {
+                self.closed = true;
+                self.stop();
+                return Ok(Async::Ready(()));
+            }
         }
-        Ok(Async::Ready(()))
     }
 
     fn poll_matrix(&mut self) -> Poll<(), io::Error> {
-        if let Some(sync_response) = try_ready!(self.matrix_client.poll()) {
-            self.handle_sync_response(sync_response);
-        } else {
-            self.closed = true;
+        loop {
+            if let Some(sync_response) = try_ready!(self.matrix_client.poll()) {
+                self.handle_sync_response(sync_response);
+            } else {
+                self.closed = true;
+                self.stop();
+                return Ok(Async::Ready(()))
+            }
         }
-        Ok(Async::Ready(()))
     }
 }
 
-impl<IS: Io> Future for Bridge<IS> {
-    type Item = ();
+impl<IS: Io> TaskExecutor for Bridge<IS> {
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        trace!(self.ctx.logger, "Bridge Polled");
-
-        loop {
-            if self.closed {
-                return Ok(Async::Ready(()));
-            }
-
-            if let (Async::NotReady, Async::NotReady) = (self.poll_irc()?, self.poll_matrix()?) {
-                break;
-            }
-        }
-
-        Ok(Async::NotReady)
+    fn task_executor_mut(&mut self) -> &mut TaskExecutorQueue<Self, io::Error> {
+        &mut self.executor_queue
     }
 }
 

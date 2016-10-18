@@ -27,6 +27,10 @@ version = "0.8.3"
 [dependencies.slog]
 version = "1.0.0"
 
+[dependencies.tasked-futures]
+git = "https://github.com/erikjohnston/tasked-futures.git"
+optional = false
+
 [dependencies.tokio-dns]
 branch = "erikj/crates-io-deps"
 git = "https://github.com/erikjohnston/tokio-dns"
