@@ -15,7 +15,7 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-#![feature(proc_macro, question_mark, conservative_impl_trait)]
+#![feature(proc_macro, conservative_impl_trait)]
 
 #[macro_use]
 extern crate serde_derive;
@@ -45,6 +45,7 @@ extern crate clap;
 extern crate httparse;
 extern crate netbuf;
 extern crate rand;
+extern crate tasked_futures;
 
 
 use clap::{Arg, App};
@@ -66,6 +67,8 @@ use tokio_tls::backend::openssl::ServerContextExt;
 
 use openssl::crypto::pkey::PKey;
 use openssl::x509::X509;
+
+use tasked_futures::TaskExecutor;
 
 
 lazy_static! {
@@ -256,6 +259,7 @@ fn main() {
                 // the Bridge::create returns a future that resolves to a Bridge object. The
                 // Bridge object is *also* a future that we want to wait on, so we use `flatten()`
                 bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
+                .map(|bridge| bridge.into_future())
                 .flatten()
                 .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)))
             }).then(|r| {
@@ -272,6 +276,7 @@ fn main() {
             .and_then(move |socket| {
                 bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
             })
+            .map(|bridge| bridge.into_future())
             .flatten()
             .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
 
