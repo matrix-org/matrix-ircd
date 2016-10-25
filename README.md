@@ -32,8 +32,8 @@ cargo build --features trace_logging
 ```
 
 
-<sup>1</sup> It is recommended to use a tool such as [rustup](https://www.rustup.rs) to
-manage the rust compiler toolchains.
+<sup>1</sup> It is recommended to use a tool such as [rustup.rs](https://www.rustup.rs) to
+manage the rust compiler toolchains. See ["Working with nightly Rust"](https://github.com/rust-lang-nursery/rustup.rs#working-with-nightly-rust) for instructions on how to do so with rustup.
 
 
 ## Usage
