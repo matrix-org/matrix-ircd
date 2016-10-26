@@ -161,6 +161,12 @@ impl<S: Io> IrcUserConnection<S> {
         self.conn.write_invalid_password(&self.nick);
     }
 
+    pub fn write_redirect_join(&mut self, old_channel: &str, new_channel: &str) {
+        self.conn.write_numeric(Numeric::RplForwardedChannel, &self.nick, &format!(
+            "{} {} :Forwarding to another channel", old_channel, new_channel,
+        ));
+    }
+
     pub fn welcome(&mut self) {
         self.conn.welcome(&self.nick);
     }
