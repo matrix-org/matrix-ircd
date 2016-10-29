@@ -36,11 +36,14 @@ use tokio_core::io::Io;
 use tokio_core::reactor::Handle;
 use url::Url;
 
+use tasked_futures::{TaskExecutorQueue, TaskExecutor, FutureTaskedExt, TaskedFuture};
+
+
 /// Bridges a single IRC connection with a matrix session.
 ///
 /// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
 /// on unrecoverable error).
-pub struct Bridge<IS: Io> {
+pub struct Bridge<IS: Io + 'static> {
     irc_conn: IrcUserConnection<IS>,
     matrix_client: MatrixClient,
     ctx: ConnectionContext,
@@ -48,6 +51,8 @@ pub struct Bridge<IS: Io> {
     mappings: MappingStore,
     handle: Handle,
     is_first_sync: bool,
+    executor_queue: TaskExecutorQueue<Bridge<IS>, io::Error>,
+    joining_map: BTreeMap<String, String>,
 }
 
 impl<IS: Io> Bridge<IS> {
@@ -69,7 +74,9 @@ impl<IS: Io> Bridge<IS> {
                         closed: false,
                         mappings: MappingStore::default(),
                         handle: handle,
-                        is_first_sync: true
+                        is_first_sync: true,
+                        executor_queue: TaskExecutorQueue::default(),
+                        joining_map: BTreeMap::new(),
                     }),
                     Err(LoginError::InvalidPassword) => {
                         user_connection.write_invalid_password();
@@ -86,6 +93,8 @@ impl<IS: Io> Bridge<IS> {
                 let own_user_id = matrix_client.get_user_id().into();
                 mappings.insert_nick(irc_conn, own_nick, own_user_id);
             }
+            bridge.spawn_fn(|bridge| bridge.poll_irc());
+            bridge.spawn_fn(|bridge| bridge.poll_matrix());
             Ok(bridge)
         })
     }
@@ -106,7 +115,36 @@ impl<IS: Io> Bridge<IS> {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }
             }
-            // TODO: Handle JOIN
+            IrcCommand::Join { channel } => {
+                info!(self.ctx.logger, "Joining channel"; "channel" => channel);
+
+                let logger = self.ctx.logger.clone();
+                let join_future = self.matrix_client.join_room(channel.as_str())
+                    .into_tasked()
+                    .map(move |room_join_response, bridge: &mut Bridge<IS>| {
+                        let room_id = room_join_response.room_id;
+
+                        info!(logger, "Joined channel"; "channel" => channel, "room_id" => room_id);
+
+                        if let Some(mapped_channel) = bridge.mappings.room_id_to_channel(&room_id) {
+                            if mapped_channel == &channel {
+                                // We've already joined this channel, most likely we got the sync
+                                // response before the joined response.
+                                // TODO: Do we wan to send something to IRC?
+                                trace!(logger, "Already in IRC channel");
+                            } else {
+                                // We respond to the join with a redirect!
+                                trace!(logger, "Redirecting channl"; "prev" => channel, "new" => *mapped_channel);
+                                bridge.irc_conn.write_redirect_join(&channel, mapped_channel);
+                            }
+                        } else {
+                            trace!(logger, "Waiting for room to come down sync"; "room_id" => room_id);
+                            bridge.joining_map.insert(room_id, channel);
+                        }
+                    });
+                // TODO: Handle failure of join. Ensure that joining map is cleared.
+                self.spawn(join_future);
+            }
             // TODO: Handle PART
             c => {
                 warn!(self.ctx.logger, "Ignoring IRC command"; "command" => c.command());
@@ -142,6 +180,12 @@ impl<IS: Io> Bridge<IS> {
             return;
         };
 
+        if let Some(attempt_channel) = self.joining_map.remove(room_id) {
+            if &attempt_channel != &channel {
+                self.irc_conn.write_redirect_join(&attempt_channel, &channel);
+            }
+        }
+
         for ev in &sync.timeline.events {
             if ev.etype == "m.room.message" {
                 if let Some(body) = ev.content.find("body").and_then(Value::as_str) {
@@ -166,42 +210,35 @@ impl<IS: Io> Bridge<IS> {
             return Ok(Async::NotReady);
         }
 
-        if let Some(line) = try_ready!(self.irc_conn.poll()) {
-            self.handle_irc_cmd(line);
-        } else {
-            self.closed = true;
+        loop {
+            if let Some(line) = try_ready!(self.irc_conn.poll()) {
+                self.handle_irc_cmd(line);
+            } else {
+                self.closed = true;
+                self.stop();
+                return Ok(Async::Ready(()));
+            }
         }
-        Ok(Async::Ready(()))
     }
 
     fn poll_matrix(&mut self) -> Poll<(), io::Error> {
-        if let Some(sync_response) = try_ready!(self.matrix_client.poll()) {
-            self.handle_sync_response(sync_response);
-        } else {
-            self.closed = true;
+        loop {
+            if let Some(sync_response) = try_ready!(self.matrix_client.poll()) {
+                self.handle_sync_response(sync_response);
+            } else {
+                self.closed = true;
+                self.stop();
+                return Ok(Async::Ready(()))
+            }
         }
-        Ok(Async::Ready(()))
     }
 }
 
-impl<IS: Io> Future for Bridge<IS> {
-    type Item = ();
+impl<IS: Io> TaskExecutor for Bridge<IS> {
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        trace!(self.ctx.logger, "Bridge Polled");
-
-        loop {
-            if self.closed {
-                return Ok(Async::Ready(()));
-            }
-
-            if let (Async::NotReady, Async::NotReady) = (self.poll_irc()?, self.poll_matrix()?) {
-                break;
-            }
-        }
-
-        Ok(Async::NotReady)
+    fn task_executor_mut(&mut self) -> &mut TaskExecutorQueue<Self, io::Error> {
+        &mut self.executor_queue
     }
 }
 
@@ -226,6 +263,10 @@ impl MappingStore {
 
     pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&String> {
         self.channel_to_room_id.get(channel)
+    }
+
+    pub fn room_id_to_channel(&mut self, room_id: &str) -> Option<&String> {
+        self.room_id_to_channel.get(room_id)
     }
 
     pub fn create_or_get_channel_name_from_matrix<S: Io>(

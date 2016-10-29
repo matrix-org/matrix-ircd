@@ -79,6 +79,16 @@ pub struct LoginResponse {
     pub user_id: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RoomJoinInput {
+    // third_party_signed at some point
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoomJoinResponse {
+    pub room_id: String,
+}
+
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RoomSendInput {

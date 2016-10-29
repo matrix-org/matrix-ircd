@@ -247,7 +247,7 @@ impl Serialize for Command {
     fn serialize(
         &self,
         _record: &Record,
-        key: &str,
+        key: &'static str,
         serializer: &mut Serializer
     ) -> Result<(), SlogSerError> {
         serializer.emit_str(key, self.to_str())
@@ -334,6 +334,7 @@ pub enum Numeric {
     RplMotd = 372,
     RplMotdstart = 375,
     RplEndofmotd = 376,
+    RplForwardedChannel = 470,
     ErrNeedmoreparams = 461,
     ErrPasswdmismatch = 464,
 }
@@ -357,6 +358,7 @@ impl<'a> From<Numeric> for &'a str {
             Numeric::RplMotd => "372",
             Numeric::RplMotdstart => "375",
             Numeric::RplEndofmotd => "376",
+            Numeric::RplForwardedChannel => "470",
             Numeric::ErrNeedmoreparams => "461",
             Numeric::ErrPasswdmismatch => "464",
         }
