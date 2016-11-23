@@ -16,14 +16,13 @@ macro_rules! task_log {
     ($lvl:expr, $($args:tt)+) => {{
         use CONTEXT;
 
-        let o = CONTEXT.with(move |m| {
-            m.borrow().as_ref().map(|c| c.logger.clone())
+        CONTEXT.with(|m| {
+            if let Some(ref ctx) = m.borrow().as_ref() {
+                log!($lvl, ctx.logger, $($args)+)
+            } else {
+                log!($lvl, ::DEFAULT_LOGGER, $($args)+)
+            }
         });
-        if let Some(log) = o {
-            log!($lvl, log, $($args)+)
-        } else {
-            log!($lvl, ::DEFAULT_LOGGER, $($args)+)
-        }
     }}
 }
 

@@ -59,6 +59,7 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::fs::File;
 use std::io::Read;
+use std::sync::Arc;
 
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
@@ -97,7 +98,7 @@ pub mod http;
 /// A task local context describing the connection (from an IRC client).
 #[derive(Clone)]
 pub struct ConnectionContext {
-    logger: slog::Logger,
+    logger: Arc<slog::Logger>,
     peer_addr: SocketAddr,
 }
 
@@ -217,7 +218,7 @@ fn main() {
         let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
         let ctx = ConnectionContext {
-            logger: peer_log.clone(),
+            logger: Arc::new(peer_log),
             peer_addr: addr,
         };
 
@@ -227,7 +228,7 @@ fn main() {
 
         // Set up a new task for the connection. We do this early so that the logging is correct.
         let setup_future = futures::lazy(move || {
-            debug!(peer_log, "Accepted connection");
+            debug!(cloned_ctx.logger, "Accepted connection");
 
             CONTEXT.with(|m| {
                 *m.borrow_mut() = Some(cloned_ctx);
