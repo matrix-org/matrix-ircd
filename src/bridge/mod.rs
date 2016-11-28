@@ -185,15 +185,42 @@ impl<IS: Io> Bridge<IS> {
         }
 
         for ev in &sync.timeline.events {
-            if ev.etype == "m.room.message" {
-                if let Some(body) = ev.content.find("body").and_then(Value::as_str) {
-                    if let Some(sender_nick) = self.mappings.get_nick_from_matrix(&ev.sender) {
-                        self.irc_conn.send_message(&channel, sender_nick, body);
-                    } else {
-                        warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+            match ev.etype.as_ref() {
+                "m.room.message" => {
+                    if let Some(body) = ev.content.find("body").and_then(Value::as_str) {
+                        if let Some(sender_nick) = self.mappings.get_nick_from_matrix(&ev.sender) {
+                            self.irc_conn.send_message(&channel, sender_nick, body);
+                        } else {
+                            warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+                        }
                     }
-                }
+                },
+                "m.room.member" => {
+                    let userid = match ev.state_key {
+                        Some(ref uid) => uid,
+                        None      => {
+                            warn!(self.ctx.logger, "MemberEvent with no username, skipping"; "event" => format!("{:?}", ev));
+                            continue;
+                        }
+                    };
+                    let displayname = match ev.content.find("displayname").and_then(Value::as_str) {
+                        Some(dname) => dname,
+                        None        => userid,
+                    };
+
+                    if let Some(membership) = ev.content.find("membership").and_then(Value::as_str) {
+                        match membership.as_ref() {
+                            "join" => {
+                                self.mappings.create_or_get_nick_from_matrix(&mut self.irc_conn, &userid, &displayname);
+                                self.irc_conn.write_join(&displayname, &channel);
+                            },
+                            _  => warn!(self.ctx.logger, "NYI room membership event"; "membership" => membership)
+                        }
+                    }
+                },
+                _ => warn!(self.ctx.logger, "NYI timeline event"; "event" => format!("{:?}", ev))
             }
+
         }
 
         if !new {
