@@ -106,10 +106,9 @@ impl<IS: Io> Bridge<IS> {
             IrcCommand::PrivMsg { channel, text } => {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
                     info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
-                    let logger = self.ctx.logger.clone();
                     self.handle.spawn(
                         self.matrix_client.send_text_message(room_id, text)
-                        .map(|_| ()).map_err(move |_| warn!(logger, "Failed to send"))
+                        .map(|_| ()).map_err(move |_| task_warn!("Failed to send"))
                     );
                 } else {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
@@ -118,27 +117,26 @@ impl<IS: Io> Bridge<IS> {
             IrcCommand::Join { channel } => {
                 info!(self.ctx.logger, "Joining channel"; "channel" => channel);
 
-                let logger = self.ctx.logger.clone();
                 let join_future = self.matrix_client.join_room(channel.as_str())
                     .into_tasked()
                     .map(move |room_join_response, bridge: &mut Bridge<IS>| {
                         let room_id = room_join_response.room_id;
 
-                        info!(logger, "Joined channel"; "channel" => channel, "room_id" => room_id);
+                        task_info!("Joined channel"; "channel" => channel, "room_id" => room_id);
 
                         if let Some(mapped_channel) = bridge.mappings.room_id_to_channel(&room_id) {
                             if mapped_channel == &channel {
                                 // We've already joined this channel, most likely we got the sync
                                 // response before the joined response.
                                 // TODO: Do we wan to send something to IRC?
-                                trace!(logger, "Already in IRC channel");
+                                task_trace!("Already in IRC channel");
                             } else {
                                 // We respond to the join with a redirect!
-                                trace!(logger, "Redirecting channl"; "prev" => channel, "new" => *mapped_channel);
+                                task_trace!("Redirecting channl"; "prev" => channel, "new" => *mapped_channel);
                                 bridge.irc_conn.write_redirect_join(&channel, mapped_channel);
                             }
                         } else {
-                            trace!(logger, "Waiting for room to come down sync"; "room_id" => room_id);
+                            task_trace!("Waiting for room to come down sync"; "room_id" => room_id);
                             bridge.joining_map.insert(room_id, channel);
                         }
                     });
