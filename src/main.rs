@@ -31,7 +31,6 @@ extern crate tokio_dns;
 #[macro_use]
 extern crate slog;
 extern crate slog_term;
-extern crate curl;
 extern crate url;
 #[macro_use]
 extern crate lazy_static;
