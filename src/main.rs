@@ -45,6 +45,8 @@ extern crate httparse;
 extern crate netbuf;
 extern crate rand;
 extern crate tasked_futures;
+#[macro_use]
+extern crate itertools;
 
 
 use clap::{Arg, App};

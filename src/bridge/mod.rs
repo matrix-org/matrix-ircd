@@ -30,6 +30,8 @@ use matrix::Room as MatrixRoom;
 use std::io;
 use std::collections::BTreeMap;
 
+use itertools::Itertools;
+
 use serde_json::Value;
 
 use tokio_core::io::Io;
@@ -212,9 +214,14 @@ impl<IS: Io> Bridge<IS> {
                         match membership.as_ref() {
                             "join" => {
                                 self.mappings.create_or_get_nick_from_matrix(&mut self.irc_conn, &userid, &displayname);
-                                let email_name = userid[1..].split(":").collect::<Vec<&str>>().join("@");
-                                let nickname = format!("{}!{}", &displayname, &email_name);
+                                let nickname = format!("{}!{}", &displayname, self.ircify_userid(&userid));
                                 self.irc_conn.write_join(&nickname, &channel);
+                            },
+                            "leave" => {
+                                if let Some(displayname) = self.mappings.get_nick_from_matrix(&ev.sender) {
+                                    let nickname = format!("{}!{}", &displayname, self.ircify_userid(&userid));
+                                    self.irc_conn.write_part(&nickname, &channel);
+                                }
                             },
                             _  => warn!(self.ctx.logger, "NYI room membership event"; "membership" => membership)
                         }
@@ -228,6 +235,10 @@ impl<IS: Io> Bridge<IS> {
         if !new {
             // TODO: Send down new state
         }
+    }
+
+    fn ircify_userid(&self, userid: &str) -> String {
+        userid[1..].splitn(2, ":").join("@")
     }
 
     fn poll_irc(&mut self) -> Poll<(), io::Error> {
