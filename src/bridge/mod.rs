@@ -212,7 +212,9 @@ impl<IS: Io> Bridge<IS> {
                         match membership.as_ref() {
                             "join" => {
                                 self.mappings.create_or_get_nick_from_matrix(&mut self.irc_conn, &userid, &displayname);
-                                self.irc_conn.write_join(&displayname, &channel);
+                                let email_name = userid[1..].split(":").collect::<Vec<&str>>().join("@");
+                                let nickname = format!("{}!{}", &displayname, &email_name);
+                                self.irc_conn.write_join(&nickname, &channel);
                             },
                             _  => warn!(self.ctx.logger, "NYI room membership event"; "membership" => membership)
                         }
