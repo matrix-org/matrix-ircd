@@ -186,7 +186,7 @@ impl<IS: Io> Bridge<IS> {
 
         for ev in &sync.timeline.events {
             if ev.etype == "m.room.message" {
-                if let Some(body) = ev.content.find("body").and_then(Value::as_str) {
+                if let Some(body) = ev.content.get("body").and_then(Value::as_str) {
                     if let Some(sender_nick) = self.mappings.get_nick_from_matrix(&ev.sender) {
                         self.irc_conn.send_message(&channel, sender_nick, body);
                     } else {

@@ -8,20 +8,23 @@ clap = "2.14.0"
 futures = "0.1.1"
 httparse = "1.1.2"
 lazy_static = "0.2.1"
+native-tls = "0.1.1"
 netbuf = "0.3.2"
 pest = "0.4.0"
 quick-error = "1.1.0"
 rand = "0.3.14"
-serde = "0.8.10"
-serde_derive = "0.8.10"
-serde_json = "0.8.2"
+serde = "0.9.0"
+serde_derive = "0.9.0"
+serde_json = "0.9.0"
 slog-term = "1.1.0"
 tokio-core = "0.1.0"
+tokio-dns-unofficial = "0.1.0"
+tokio-proto = "0.1.0"
+tokio-tls = "0.1.1"
 url = "1.2.1"
 
 [dependencies.openssl]
-features = ["x509_clone"]
-version = "0.8.3"
+version = "0.9.0"
 
 [dependencies.slog]
 version = "1.0.0"
@@ -30,20 +33,8 @@ version = "1.0.0"
 git = "https://github.com/erikjohnston/tasked-futures.git"
 optional = false
 
-[dependencies.tokio-dns]
-branch = "erikj/crates-io-deps"
-git = "https://github.com/erikjohnston/tokio-dns"
-optional = false
-
-[dependencies.tokio-proto]
-git = "https://github.com/tokio-rs/tokio-proto"
-
 [dependencies.tokio-timer]
 git = "https://github.com/tokio-rs/tokio-timer"
-
-[dependencies.tokio-tls]
-features = ["force-openssl"]
-git = "https://github.com/tokio-rs/tokio-tls"
 
 [features]
 clippy = []

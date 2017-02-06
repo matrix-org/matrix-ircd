@@ -154,7 +154,7 @@ impl<S: Io> IrcUserConnection<S> {
     }
 
     pub fn send_message(&mut self, channel: &str, sender: &str, body: &str) {
-        for line in body.split("\n") {
+        for line in body.split('\n') {
             self.conn.write_line(&format!(":{} PRIVMSG {} :{}", sender, channel, line));
         }
     }

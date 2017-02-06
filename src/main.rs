@@ -15,7 +15,7 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-#![feature(proc_macro, conservative_impl_trait)]
+#![feature(conservative_impl_trait)]
 
 #[macro_use]
 extern crate serde_derive;
@@ -45,6 +45,7 @@ extern crate httparse;
 extern crate netbuf;
 extern crate rand;
 extern crate tasked_futures;
+extern crate native_tls;
 
 
 use clap::{Arg, App};
@@ -57,18 +58,17 @@ use slog::DrainExt;
 use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read};
 use std::sync::Arc;
 
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 
-use tokio_tls::backend::openssl::ServerContextExt;
-
-use openssl::crypto::pkey::PKey;
-use openssl::x509::X509;
+use native_tls::{TlsAcceptor, Pkcs12};
+use tokio_tls::TlsAcceptorExt;
 
 use tasked_futures::TaskExecutor;
+
 
 
 lazy_static! {
@@ -102,42 +102,19 @@ pub struct ConnectionContext {
 }
 
 
-#[derive(Clone)]
-struct TlsOptions {
-    cert: X509,
-    pkey_bytes: Vec<u8>,
-}
-
-
-fn load_cert_from_file(cert_file: &str) -> Result<X509, String> {
+fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Pkcs12, String> {
     File::open(&cert_file)
     .and_then(|mut file| {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
     })
-    .map_err(|err| format!("Failed to load cert: {}", err))
+    .map_err(|err| format!("Failed to load Pkcs12: {}", err))
     .and_then(|buf| {
-        X509::from_pem(&buf)
-        .map_err(|err| format!("Failed to load cert: {}", err))
+        Pkcs12::from_der(&buf, password)
+        .map_err(|err| format!("Failed to load Pkcs12: {}", err))
     })
 }
-
-
-fn load_pkey_from_file(pkey_file: &str) -> Result<PKey, String> {
-    File::open(&pkey_file)
-    .and_then(|mut file| {
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-        Ok(buf)
-    })
-    .map_err(|err| format!("Failed to load pkey: {}", err))
-    .and_then(|buf| {
-        PKey::private_key_from_pem(&buf)
-        .map_err(|err| format!("Failed to load pkey: {}", err))
-    })
-}
-
 
 fn main() {
     let matches = App::new("IRC Matrix Daemon")
@@ -154,23 +131,17 @@ fn main() {
                 .map_err(|err| format!("Invalid bind address: {}", err))
             })
         )
-        .arg(Arg::with_name("CERT")
-            .long("cert")
-            .help("Sets the PEM file to read TLS cert from")
+        .arg(Arg::with_name("PKCS12")
+            .long("pkcs12")
+            .help("Sets the PKCS#12 file to read TLS cert and pkeyfrom")
             .takes_value(true)
-            .requires("PKEY")
-            .validator(|cert| {
-                load_cert_from_file(&cert).map(|_| ())
-            })
+            .requires("PASSWORD")
         )
-        .arg(Arg::with_name("PKEY")
-            .long("pkey")
-            .help("Sets the PEM file to read TLS pkey from")
+        .arg(Arg::with_name("PASSWORD")
+            .long("password")
+            .help("The password of the PKCS#12 file")
             .takes_value(true)
-            .requires("CERT")
-            .validator(|pkey| {
-                load_pkey_from_file(&pkey).map(|_| ())
-            })
+             .requires("PKCS12")
         )
         .arg(Arg::with_name("MATRIX_HS")
             .long("url")
@@ -194,13 +165,14 @@ fn main() {
     let matrix_url = url::Url::parse(matches.value_of("MATRIX_HS").unwrap()).unwrap();
 
     let mut tls = false;
-    let cert_pkey = if let (Some(cert_file), Some(pkey_file)) = (matches.value_of("CERT"), matches.value_of("PKEY")) {
+    let tls_acceptor = if let Some(pkcs12_file) = matches.value_of("PKCS12") {
         tls = true;
 
-        Some(TlsOptions {
-            cert: load_cert_from_file(cert_file).unwrap(),
-            pkey_bytes: load_pkey_from_file(pkey_file).unwrap().private_key_to_pem().unwrap(),
-        })
+        let pass = matches.value_of("PASSWORD").unwrap();
+
+        let pkcs12 = load_pkcs12_from_file(pkcs12_file, pass).expect("error reading pkcs12");
+        let acceptor = TlsAcceptor::builder(pkcs12).unwrap().build().unwrap();
+        Some(Arc::new(acceptor))
     } else {
         None
     };
@@ -243,14 +215,11 @@ fn main() {
         // two levels of closures (understandably)
         let cloned_url = matrix_url.clone();
 
-        if let Some(options) = cert_pkey.clone() {
+        if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
             let future = setup_future.and_then(move |socket| {
-                tokio_tls::ServerContext::new(
-                    &options.cert,
-                    &PKey::private_key_from_pem(&options.pkey_bytes).unwrap(),
-                ).expect("Invalid cert and pem")
-                .handshake(socket)
+                acceptor.accept_async(socket)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
             })
             .map_err(move |err| {
                 task_warn!("TLS handshake failed"; "error" => format!("{}", err));

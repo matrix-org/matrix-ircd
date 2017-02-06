@@ -49,16 +49,17 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-    -b, --bind <BIND>        Sets the address to bind to. Defaults to 127.0.0.1:5999
-        --cert <CERT>        Sets the PEM file to read TLS cert from
-        --url <MATRIX_HS>    The base url of the Matrix HS
-        --pkey <PKEY>        Sets the PEM file to read TLS pkey from
+    -b, --bind <BIND>            Sets the address to bind to. Defaults to 127.0.0.1:5999
+        --url <MATRIX_HS>        The base url of the Matrix HS
+        --password <PASSWORD>    The password of the PKCS#12 file
+        --pkcs12 <PKCS12>        Sets the PKCS#12 file to read TLS cert and pkeyfrom
+
 ```
 
 The `MATRIX_HS` URL should be of the form: `https://matrix.org`. Plain HTTP is
 also supported but should *only* be used for testing and development.
 
-Supplying both `pkey` and `cert` arguments will cause Matrix IRCd to listen
+Supplying both `pkcs12` and `password` arguments will cause Matrix IRCd to listen
 on TLS, otherwise it will use plain TCP.
 
 The credentials for the matrix account are taken from the user name and server
