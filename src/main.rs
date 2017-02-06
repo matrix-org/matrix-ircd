@@ -45,6 +45,7 @@ extern crate httparse;
 extern crate netbuf;
 extern crate rand;
 extern crate tasked_futures;
+extern crate native_tls;
 
 
 use clap::{Arg, App};
@@ -63,9 +64,9 @@ use std::sync::Arc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 
-use tokio_tls::backend::openssl::ServerContextExt;
+// use tokio_tls::backend::openssl::ServerContextExt;
 
-use openssl::crypto::pkey::PKey;
+use openssl::pkey::PKey;
 use openssl::x509::X509;
 
 use tasked_futures::TaskExecutor;

@@ -87,7 +87,7 @@ impl Room {
         let mut mods = BTreeSet::new();
         {
             let mod_map = self.get_state("m.room.power_levels", "")
-                .and_then(|content| content.find("users"))
+                .and_then(|content| content.get("users"))
                 .and_then(Value::as_object);
 
             if let Some(users) = mod_map {
@@ -106,8 +106,8 @@ impl Room {
 
             if let Some(member_state) = state.get("m.room.member") {
                 for (user_id, ev) in member_state {
-                    let membership = ev.content.find("membership").and_then(Value::as_str).unwrap_or("");
-                    let display_name = ev.content.find("displayname").and_then(Value::as_str).unwrap_or("");
+                    let membership = ev.content.get("membership").and_then(Value::as_str).unwrap_or("");
+                    let display_name = ev.content.get("displayname").and_then(Value::as_str).unwrap_or("");
 
                     if membership == "join" {
                         members.insert(user_id.clone(), Member {

@@ -27,9 +27,13 @@ use tokio_core::reactor::Handle;
 use tokio_core::io::Io;
 use tokio_dns::tcp_connect;
 use tokio_tls;
+use tokio_tls::TlsConnectorExt;
+
+use native_tls::TlsConnector;
 
 use httparse;
 use netbuf;
+
 
 
 
@@ -53,8 +57,9 @@ impl HttpClient {
                 tcp_connect(
                     (host_clone.as_str(), port), handle.remote().clone()
                 ).and_then(move |stream| {
-                    let client = tokio_tls::ClientContext::new().expect("failed to initialize ssl");
-                    client.handshake(&host_clone, stream)
+                    let connector = TlsConnector::builder().unwrap().build().unwrap();
+                    connector.connect_async(&host_clone, stream)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
                 })
             }));
         } else {
