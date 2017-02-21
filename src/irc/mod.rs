@@ -162,8 +162,14 @@ impl<S: Io> IrcUserConnection<S> {
     }
 
     pub fn send_message(&mut self, channel: &str, sender: &str, body: &str) {
-        for line in body.split("\n") {
+        for line in body.split('\n') {
             self.conn.write_line(&format!(":{} PRIVMSG {} :{}", sender, channel, line));
+        }
+    }
+
+    pub fn send_action(&mut self, channel: &str, sender: &str, body: &str) {
+        for line in body.split('\n') {
+            self.conn.write_line(&format!(":{} PRIVMSG {} :\u{0001}ACTION {}\u{0001}", sender, channel, line));
         }
     }
 

@@ -30,8 +30,6 @@ use matrix::Room as MatrixRoom;
 use std::io;
 use std::collections::BTreeMap;
 
-use itertools::Itertools;
-
 use serde_json::Value;
 
 use tokio_core::io::Io;
@@ -188,15 +186,6 @@ impl<IS: Io> Bridge<IS> {
 
         for ev in &sync.timeline.events {
             match ev.etype.as_ref() {
-                "m.room.message" => {
-                    if let Some(body) = ev.content.find("body").and_then(Value::as_str) {
-                        if let Some(sender_nick) = self.mappings.get_nick_from_matrix(&ev.sender) {
-                            self.irc_conn.send_message(&channel, sender_nick, body);
-                        } else {
-                            warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
-                        }
-                    }
-                },
                 "m.room.member" => {
                     let userid = match ev.state_key {
                         Some(ref uid) => uid,
@@ -205,12 +194,12 @@ impl<IS: Io> Bridge<IS> {
                             continue;
                         }
                     };
-                    let displayname = match ev.content.find("displayname").and_then(Value::as_str) {
+                    let displayname = match ev.content.get("displayname").and_then(Value::as_str) {
                         Some(dname) => dname,
                         None        => userid,
                     };
 
-                    if let Some(membership) = ev.content.find("membership").and_then(Value::as_str) {
+                    if let Some(membership) = ev.content.get("membership").and_then(Value::as_str) {
                         match membership.as_ref() {
                             "join" => {
                                 self.mappings.create_or_get_nick_from_matrix(&mut self.irc_conn, &userid, &displayname);
@@ -227,6 +216,46 @@ impl<IS: Io> Bridge<IS> {
                         }
                     }
                 },
+                "m.room.message" => {
+                    let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
+                        Some(x) => x,
+                        None    => {
+                            warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+                            continue;
+                        }
+                    };
+                    let body = match ev.content.get("body").and_then(Value::as_str) {
+                        Some(x) => x,
+                        None    => {
+                            warn!(self.ctx.logger, "Message has no body"; "room" => room_id, "message" => format!("{:?}", ev));
+                            continue;
+                        }
+                    };
+                    let msgtype = match ev.content.get("msgtype").and_then(Value::as_str) {
+                        Some(x) => x,
+                        None    => {
+                            warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id, "message" => format!("{:?}", ev));
+                            continue;
+                        }
+                    };
+                    match msgtype {
+                        "m.text"  => self.irc_conn.send_message(&channel, sender_nick, body),
+                        "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body),
+                        "m.image" | "m.file" | "m.video" | "m.audio" => {
+                            let url = ev.content.get("url").and_then(Value::as_str);
+                            match url {
+                                Some(url) => self.irc_conn.send_message(&channel, sender_nick,
+                                                                        self.matrix_client.media_url(&url).as_str()),
+                                None      => warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
+                                                                                                "message" => format!("{:?}", ev))
+                            }
+                        },
+                        _ => {
+                            warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
+                            self.irc_conn.send_message(&channel, sender_nick, body);
+                        },
+                    }
+                },
                 _ => warn!(self.ctx.logger, "NYI timeline event"; "event" => format!("{:?}", ev))
             }
 
@@ -238,7 +267,7 @@ impl<IS: Io> Bridge<IS> {
     }
 
     fn ircify_userid(&self, userid: &str) -> String {
-        userid[1..].splitn(2, ":").join("@")
+        userid[1..].replacen(":", "@", 1).replace(" ", "")
     }
 
     fn poll_irc(&mut self) -> Poll<(), io::Error> {
