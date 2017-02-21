@@ -132,6 +132,12 @@ impl MatrixClient {
         self.rooms.get(room_id)
     }
 
+    pub fn media_url(&self, mxc: &str) -> String {
+        let mut url = String::from(self.url.as_str());
+        url.push_str("/media/r0/download/");
+        mxc.replace("mxc://", &url)
+    }
+
     fn poll_sync(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
         let mut resp = try_ready!(self.sync_client.poll());
         if let Some(ref mut sync_response) = resp {

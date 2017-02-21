@@ -186,12 +186,43 @@ impl<IS: Io> Bridge<IS> {
 
         for ev in &sync.timeline.events {
             if ev.etype == "m.room.message" {
-                if let Some(body) = ev.content.get("body").and_then(Value::as_str) {
-                    if let Some(sender_nick) = self.mappings.get_nick_from_matrix(&ev.sender) {
-                        self.irc_conn.send_message(&channel, sender_nick, body);
-                    } else {
+                let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
+                    Some(x) => x,
+                    None    => {
                         warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+                        continue;
                     }
+                };
+                let body = match ev.content.get("body").and_then(Value::as_str) {
+                    Some(x) => x,
+                    None    => {
+                        warn!(self.ctx.logger, "Message has no body"; "room" => room_id, "message" => format!("{:?}", ev));
+                        continue;
+                    }
+                };
+                let msgtype = match ev.content.get("msgtype").and_then(Value::as_str) {
+                    Some(x) => x,
+                    None    => {
+                        warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id, "message" => format!("{:?}", ev));
+                        continue;
+                    }
+                };
+                match msgtype {
+                    "m.text"  => self.irc_conn.send_message(&channel, sender_nick, body),
+                    "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body),
+                    "m.image" | "m.file" | "m.video" | "m.audio" => {
+                        let url = ev.content.get("url").and_then(Value::as_str);
+                        match url {
+                            Some(url) => self.irc_conn.send_message(&channel, sender_nick,
+                                                                    self.matrix_client.media_url(&url).as_str()),
+                            None      => warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
+                                                                                            "message" => format!("{:?}", ev))
+                        }
+                    },
+                    _ => {
+                        warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
+                        self.irc_conn.send_message(&channel, sender_nick, body);
+                    },
                 }
             }
         }
