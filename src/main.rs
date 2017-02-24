@@ -46,6 +46,7 @@ extern crate netbuf;
 extern crate rand;
 extern crate tasked_futures;
 extern crate native_tls;
+extern crate regex;
 
 
 use clap::{Arg, App};

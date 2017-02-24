@@ -34,6 +34,8 @@ use http::{Request, HttpClient};
 
 use rand::{thread_rng, Rng};
 
+use regex::Regex;
+
 
 pub mod protocol;
 mod models;
@@ -132,10 +134,17 @@ impl MatrixClient {
         self.rooms.get(room_id)
     }
 
-    pub fn media_url(&self, mxc: &str) -> String {
-        let mut url = String::from(self.url.as_str());
-        url.push_str("/media/r0/download/");
-        mxc.replace("mxc://", &url)
+    pub fn media_url(&self, url: &str) -> String {
+        let re = Regex::new("^mxc://([^/]+/[^/]+)$").unwrap();
+        if let Some(captures) = re.captures(url) {
+            self.url.join("/_matrix/media/v1/download/")
+                .unwrap()
+                .join(&captures[1])
+                .unwrap()
+                .into_string()
+        } else {
+            url.to_owned()
+        }
     }
 
     fn poll_sync(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
