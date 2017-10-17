@@ -55,13 +55,13 @@ pub struct Bridge<IS: Io + 'static> {
     joining_map: BTreeMap<String, String>,
 }
 
-impl<IS: Io> Bridge<IS> {
+impl<IS: Io + 'static> Bridge<IS> {
     /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
     /// HS with the given user name and password.
     ///
     /// The bridge won't process any IRC commands until the initial sync has finished.
-    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> impl Future<Item=Bridge<IS>, Error=io::Error> {
-        IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
+    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> Box<Future<Item=Bridge<IS>, Error=io::Error>> {
+        let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
         .and_then(move |mut user_connection| {
             MatrixClient::login(
                 handle.clone(), base_url, user_connection.user.clone(), user_connection.password.clone()
@@ -96,7 +96,9 @@ impl<IS: Io> Bridge<IS> {
             bridge.spawn_fn(|bridge| bridge.poll_irc());
             bridge.spawn_fn(|bridge| bridge.poll_matrix());
             Ok(bridge)
-        })
+        });
+
+        Box::new(f)
     }
 
     fn handle_irc_cmd(&mut self, line: IrcCommand) {
@@ -283,7 +285,7 @@ struct MappingStore {
 }
 
 impl MappingStore {
-    pub fn insert_nick<S: Io>(&mut self, irc_server: &mut IrcUserConnection<S>, nick: String, user_id: String) {
+    pub fn insert_nick<S: Io + 'static>(&mut self, irc_server: &mut IrcUserConnection<S>, nick: String, user_id: String) {
         self.matrix_uid_to_nick.insert(user_id.clone(), nick.clone());
         self.nick_matrix_uid.insert(nick.clone(), user_id.clone());
 
@@ -298,7 +300,7 @@ impl MappingStore {
         self.room_id_to_channel.get(room_id)
     }
 
-    pub fn create_or_get_channel_name_from_matrix<S: Io>(
+    pub fn create_or_get_channel_name_from_matrix<S: Io + 'static>(
         &mut self, irc_server: &mut IrcUserConnection<S>, room: &MatrixRoom
     ) -> (String, bool) {
         let room_id = room.get_room_id();
@@ -355,7 +357,7 @@ impl MappingStore {
         (channel, true)
     }
 
-    pub fn create_or_get_nick_from_matrix<S: Io>(
+    pub fn create_or_get_nick_from_matrix<S: Io + 'static>(
         &mut self, irc_server: &mut IrcUserConnection<S>, user_id: &str, display_name: &str
     ) -> String {
         if let Some(nick) = self.matrix_uid_to_nick.get(user_id) {

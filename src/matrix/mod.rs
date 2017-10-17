@@ -75,7 +75,7 @@ impl MatrixClient {
     }
 
     /// Create a session by logging in with a user name and password.
-    pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> impl Future<Item=MatrixClient, Error=LoginError> {
+    pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> Box<Future<Item=MatrixClient, Error=LoginError>> {
         let host = base_url.host_str().expect("expected host in base_url").to_string();
         let port = base_url.port_or_known_default().unwrap();
         let tls = match base_url.scheme() {
@@ -86,7 +86,7 @@ impl MatrixClient {
 
         let mut http_stream = HttpClient::new(host, port, tls, handle.clone());
 
-        do_json_post("POST", &mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
+        let f = do_json_post("POST", &mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
             user: user,
             password: password,
             login_type: "m.login.password".into(),
@@ -102,10 +102,12 @@ impl MatrixClient {
             }
         }).map(move |response: protocol::LoginResponse| {
             MatrixClient::new(handle, http_stream, &base_url, response.user_id, response.access_token)
-        })
+        });
+
+        Box::new(f)
     }
 
-    pub fn send_text_message(&mut self, room_id: &str, body: String) -> impl Future<Item=protocol::RoomSendResponse, Error=io::Error> {
+    pub fn send_text_message(&mut self, room_id: &str, body: String) -> Box<Future<Item=protocol::RoomSendResponse, Error=io::Error>> {
         let msg_id = thread_rng().gen::<u16>();
         let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message/mircd-{}", room_id, msg_id))
             .expect("Unable to construct a valid API url");
@@ -113,21 +115,28 @@ impl MatrixClient {
             .clear()
             .append_pair("access_token", &self.access_token);
 
-        do_json_post("PUT", &mut self.http_stream, &url, &protocol::RoomSendInput {
+        let f = do_json_post("PUT", &mut self.http_stream, &url, &protocol::RoomSendInput {
             body: body,
             msgtype: "m.text".into(),
         })
-        .map_err(JsonPostError::into_io_error)
+        .map_err(JsonPostError::into_io_error);
+
+        Box::new(f)
     }
 
-    pub fn join_room(&mut self, room_id: &str) -> impl Future<Item=protocol::RoomJoinResponse, Error=io::Error> {
+    pub fn join_room(&mut self, room_id: &str) -> Box<Future<Item=protocol::RoomJoinResponse, Error=io::Error>> {
         let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
         let mut url = self.url.join(&format!("/_matrix/client/r0/join/{}", roomid_encoded))
             .expect("Unable to construct a valid API url");
+
         url.query_pairs_mut()
             .clear()
             .append_pair("access_token", &self.access_token);
-        do_json_post("POST", &mut self.http_stream, &url, &protocol::RoomJoinInput { }).map_err(JsonPostError::into_io_error)
+
+        let f = do_json_post("POST", &mut self.http_stream, &url, &protocol::RoomJoinInput { })
+            .map_err(JsonPostError::into_io_error);
+
+        Box::new(f)
     }
 
     pub fn get_room(&self, room_id: &str) -> Option<&Room> {
@@ -170,10 +179,10 @@ impl MatrixClient {
 }
 
 
-fn do_json_post<I: Serialize, O: Deserialize>(method: &'static str, stream: &mut HttpClient, url: &Url, input: &I)
-    -> impl Future<Item=O, Error=JsonPostError>
+fn do_json_post<I: Serialize, O: Deserialize + 'static>(method: &'static str, stream: &mut HttpClient, url: &Url, input: &I)
+    -> Box<Future<Item=O, Error=JsonPostError>>
 {
-    stream.send_request(Request {
+    let f = stream.send_request(Request {
         method: method,
         path: format!("{}?{}", url.path(), url.query().unwrap_or("")),
         headers: vec![("Content-Type".into(), "application/json".into())],
@@ -187,7 +196,9 @@ fn do_json_post<I: Serialize, O: Deserialize>(method: &'static str, stream: &mut
 
         serde_json::from_slice(&resp.data)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid json response").into())
-    })
+    });
+
+    Box::new(f)
 }
 
 quick_error! {

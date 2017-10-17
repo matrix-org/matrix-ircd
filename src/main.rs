@@ -15,8 +15,6 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-#![feature(conservative_impl_trait)]
-
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;

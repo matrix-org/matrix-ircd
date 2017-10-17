@@ -55,15 +55,15 @@ struct UserNick {
     password: Option<String>,
 }
 
-impl<S: Io> IrcUserConnection<S> {
+impl<S: Io + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
-    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> impl Future<Item=IrcUserConnection<S>, Error=io::Error> {
+    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<Future<Item=IrcUserConnection<S>, Error=io::Error>> {
         trace!(ctx.logger, "Await login");
         let irc_conn = transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
 
         let ctx_clone = ctx.clone();
 
-        StreamFold::new(irc_conn, UserNick::default(), move |cmd, mut user_nick| {
+        let f = StreamFold::new(irc_conn, UserNick::default(), move |cmd, mut user_nick| {
             trace!(ctx.logger, "Got command"; "command" => cmd.command());
             match cmd {
                 IrcCommand::Nick { nick } => user_nick.nick = Some(nick),
@@ -118,7 +118,9 @@ impl<S: Io> IrcUserConnection<S> {
                 info!(ctx_clone.logger, "IRC conn died during login");
                 Err(io::Error::new(io::ErrorKind::UnexpectedEof, "IRC stream ended during login"))
             }
-        })
+        });
+
+        Box::new(f)
     }
 
     pub fn nick_exists(&self, nick: &str) -> bool {
