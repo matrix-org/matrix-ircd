@@ -165,7 +165,7 @@ impl MatrixClient {
                     !ev.unsigned.transaction_id.as_ref().map(|txn_id| txn_id.starts_with("mircd-")).unwrap_or(false)
                 });
 
-                if let Some(mut room) = self.rooms.get_mut(room_id) {
+                if let Some(room) = self.rooms.get_mut(room_id) {
                     room.update_from_sync(sync);
                     continue;
                 }

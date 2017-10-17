@@ -60,7 +60,7 @@ impl MatrixSyncClient {
         task_trace!("Polled sync");
         loop {
             let sync_response: SyncResponse = {
-                let mut http_stream = &mut self.http_stream;
+                let http_stream = &mut self.http_stream;
 
                 let mut current_sync = if let Some(current_sync) = self.current_sync.take() {
                     current_sync
