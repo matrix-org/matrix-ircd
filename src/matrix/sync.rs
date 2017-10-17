@@ -17,7 +17,7 @@ use futures::stream::Stream;
 
 use serde_json;
 
-use std::{io, str};
+use std::io;
 
 use super::protocol::SyncResponse;
 

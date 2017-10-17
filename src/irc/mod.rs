@@ -28,14 +28,14 @@ pub use self::protocol::{Command, IrcCommand, IrcLine, Numeric};
 use ConnectionContext;
 use stream_fold::StreamFold;
 
-use tokio_core::io::Io;
+use tokio_io::{AsyncRead, AsyncWrite};
 
 use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
 use std::io;
 
-pub struct IrcUserConnection<S: Io> {
+pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: transport::IrcServerConnection<S>,
     pub user: String,
     pub nick: String,
@@ -55,7 +55,7 @@ struct UserNick {
     password: Option<String>,
 }
 
-impl<S: Io + 'static> IrcUserConnection<S> {
+impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
     pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<Future<Item=IrcUserConnection<S>, Error=io::Error>> {
         trace!(ctx.logger, "Await login");

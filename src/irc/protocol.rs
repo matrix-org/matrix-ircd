@@ -14,7 +14,7 @@
 
 #![cfg_attr(feature = "clippy", allow(block_in_if_condition_stmt))]  // impl_rdp! uses this
 
-use slog::{Record, Serialize, Value, Serializer};
+use slog::{Record, Value, Serializer};
 use slog::Error as SlogSerError;
 
 use std::convert::From;
