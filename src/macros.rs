@@ -18,9 +18,9 @@ macro_rules! task_log {
 
         CONTEXT.with(|m| {
             if let Some(ref ctx) = m.borrow().as_ref() {
-                log!($lvl, ctx.logger, $($args)+)
+                log!(ctx.logger.as_ref(), $lvl, "", $($args)+)
             } else {
-                log!($lvl, ::DEFAULT_LOGGER, $($args)+)
+                log!(::DEFAULT_LOGGER, $lvl, "", $($args)+)
             }
         });
     }}

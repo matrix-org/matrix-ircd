@@ -14,8 +14,8 @@
 
 #![cfg_attr(feature = "clippy", allow(block_in_if_condition_stmt))]  // impl_rdp! uses this
 
-use slog::{Record, Serialize, Serializer};
-use slog::ser::Error as SlogSerError;
+use slog::{Record, Serialize, Value, Serializer};
+use slog::Error as SlogSerError;
 
 use std::convert::From;
 use std::str;
@@ -243,7 +243,7 @@ impl Command {
     }
 }
 
-impl Serialize for Command {
+impl Value for Command {
     fn serialize(
         &self,
         _record: &Record,

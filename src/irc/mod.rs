@@ -108,9 +108,9 @@ impl<S: Io + 'static> IrcUserConnection<S> {
                 };
 
                 trace!(ctx_clone.logger, "IRC conn values";
-                    "nick" => user_conn.nick,
-                    "user" => user_conn.user,
-                    "password" => user_conn.password,
+                    "nick" => user_conn.nick.clone(),
+                    "user" => user_conn.user.clone(),
+                    "password" => user_conn.password.clone(),
                 );
 
                 Ok(user_conn)

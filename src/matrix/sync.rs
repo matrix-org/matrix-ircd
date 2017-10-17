@@ -107,7 +107,7 @@ impl MatrixSyncClient {
                 })?
             };
 
-            task_trace!("Got sync response"; "next_token" => sync_response.next_batch);
+            task_trace!("Got sync response"; "next_token" => sync_response.next_batch.clone());
 
             self.next_token = Some(sync_response.next_batch.clone());
 

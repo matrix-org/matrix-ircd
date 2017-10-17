@@ -117,14 +117,14 @@ impl<IS: Io + 'static> Bridge<IS> {
                 }
             }
             IrcCommand::Join { channel } => {
-                info!(self.ctx.logger, "Joining channel"; "channel" => channel);
+                info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
 
                 let join_future = self.matrix_client.join_room(channel.as_str())
                     .into_tasked()
                     .map(move |room_join_response, bridge: &mut Bridge<IS>| {
                         let room_id = room_join_response.room_id;
 
-                        task_info!("Joined channel"; "channel" => channel, "room_id" => room_id);
+                        task_info!("Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
 
                         if let Some(mapped_channel) = bridge.mappings.room_id_to_channel(&room_id) {
                             if mapped_channel == &channel {
@@ -134,11 +134,11 @@ impl<IS: Io + 'static> Bridge<IS> {
                                 task_trace!("Already in IRC channel");
                             } else {
                                 // We respond to the join with a redirect!
-                                task_trace!("Redirecting channl"; "prev" => channel, "new" => *mapped_channel);
+                                task_trace!("Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
                                 bridge.irc_conn.write_redirect_join(&channel, mapped_channel);
                             }
                         } else {
-                            task_trace!("Waiting for room to come down sync"; "room_id" => room_id);
+                            task_trace!("Waiting for room to come down sync"; "room_id" => room_id.clone());
                             bridge.joining_map.insert(room_id, channel);
                         }
                     });
