@@ -28,7 +28,8 @@ use url::Url;
 use url::percent_encoding::{percent_encode, PATH_SEGMENT_ENCODE_SET};
 
 use serde_json;
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use http::{Request, HttpClient};
 
@@ -179,7 +180,7 @@ impl MatrixClient {
 }
 
 
-fn do_json_post<I: Serialize, O: Deserialize + 'static>(method: &'static str, stream: &mut HttpClient, url: &Url, input: &I)
+fn do_json_post<I: Serialize, O: DeserializeOwned + 'static>(method: &'static str, stream: &mut HttpClient, url: &Url, input: &I)
     -> Box<Future<Item=O, Error=JsonPostError>>
 {
     let f = stream.send_request(Request {
