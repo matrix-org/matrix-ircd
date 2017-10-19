@@ -24,7 +24,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use tokio_core::reactor::Handle;
-use tokio_core::io::Io;
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_dns::tcp_connect;
 use tokio_tls::TlsConnectorExt;
 
@@ -81,7 +81,7 @@ impl HttpClient {
         inner.requests.push_back((request, c));
 
         if let Some(ref mut task) = inner.task {
-            task.unpark();
+            task.notify();
         }
 
         o.into()
@@ -110,7 +110,7 @@ impl Default for HttpClientInner {
 }
 
 
-struct ReconnectingStream<T: Io, F> {
+struct ReconnectingStream<T: AsyncRead + AsyncWrite, F> {
     inner: Arc<Mutex<HttpClientInner>>,
     connection_state: ConnectionState<T>,
     reconnect_func: Box<FnMut(&mut Handle) -> F>,
@@ -119,7 +119,7 @@ struct ReconnectingStream<T: Io, F> {
 }
 
 
-impl<T, F> ReconnectingStream<T, F> where T: Io + 'static, F: Future<Item=T, Error=io::Error> + 'static {
+impl<T, F> ReconnectingStream<T, F> where T: AsyncRead + AsyncWrite + 'static, F: Future<Item=T, Error=io::Error> + 'static {
     pub fn spawn(mut handle: Handle, inner: Arc<Mutex<HttpClientInner>>, host: String, mut reconnect_func: Box<FnMut(&mut Handle) -> F>) {
         let conn_state = ConnectionState::Connecting { future: Box::new((reconnect_func)(&mut handle)) };
         handle.spawn(ReconnectingStream {
@@ -132,7 +132,7 @@ impl<T, F> ReconnectingStream<T, F> where T: Io + 'static, F: Future<Item=T, Err
     }
 }
 
-impl<T, F> Future for ReconnectingStream<T, F> where T: Io, F: Future<Item=T, Error=io::Error> + 'static {
+impl<T, F> Future for ReconnectingStream<T, F> where T: AsyncRead + AsyncWrite, F: Future<Item=T, Error=io::Error> + 'static {
     type Item = ();
     type Error = ();
 
@@ -169,14 +169,14 @@ impl<T, F> Future for ReconnectingStream<T, F> where T: Io, F: Future<Item=T, Er
 
 
 
-enum ConnectionState<T: Io> {
+enum ConnectionState<T: AsyncRead + AsyncWrite> {
     Connected { handler: HttpClientHandler<T> },
     Connecting { future: Box<Future<Item=T, Error=io::Error>> }
 }
 
 
 #[must_use = "http stream must be polled"]
-struct HttpClientHandler<T: Io> {
+struct HttpClientHandler<T: AsyncRead + AsyncWrite> {
     inner: Arc<Mutex<HttpClientInner>>,
     write_buffer: netbuf::Buf,
     requests: VecDeque<futures::Complete<Result<Response, io::Error>>>,
@@ -185,7 +185,7 @@ struct HttpClientHandler<T: Io> {
     client_reader: HttpParser,
 }
 
-impl<T: Io> HttpClientHandler<T> {
+impl<T: AsyncRead + AsyncWrite> HttpClientHandler<T> {
     pub fn new(inner: Arc<Mutex<HttpClientInner>>, host: String, stream: T) -> HttpClientHandler<T> {
         HttpClientHandler {
             inner: inner,
@@ -214,7 +214,7 @@ impl<T: Io> HttpClientHandler<T> {
             let new_requests = {
                 let mut inner = self.inner.lock().expect("lock is poisoned");
                 if inner.task.is_none() {
-                    inner.task = Some(task::park());
+                    inner.task = Some(task::current());
                 }
 
                 mem::replace(&mut inner.requests, VecDeque::new())
@@ -231,7 +231,7 @@ impl<T: Io> HttpClientHandler<T> {
 
             let resp = try_ready!(self.client_reader.poll_for_response(&mut self.stream));
             if let Some(future) = self.requests.pop_front() {
-                future.complete(Ok(resp));
+                future.send(Ok(resp)).ok();  // The consumer got dropped, which is probably fine
             } else {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "Response without request"));
             }
@@ -240,7 +240,7 @@ impl<T: Io> HttpClientHandler<T> {
 }
 
 
-impl<T: Io> Future for HttpClientHandler<T> {
+impl<T: AsyncRead + AsyncWrite> Future for HttpClientHandler<T> {
     type Item = ();
     type Error = io::Error;
 
@@ -249,7 +249,7 @@ impl<T: Io> Future for HttpClientHandler<T> {
             Ok(r) => Ok(r),
             Err(e) => {
                 for f in self.requests.drain(..) {
-                    f.complete(Err(clone_io_error(&e)));
+                    f.send(Err(clone_io_error(&e))).ok(); // The consumer got dropped, which is probably fine
                 }
                 Err(e)
             }

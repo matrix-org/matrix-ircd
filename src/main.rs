@@ -15,8 +15,6 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-#![feature(conservative_impl_trait)]
-
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
@@ -26,10 +24,12 @@ extern crate futures;
 #[macro_use]
 extern crate tokio_core;
 extern crate tokio_proto;
+extern crate tokio_io;
 extern crate tokio_tls;
 extern crate tokio_dns;
 #[macro_use]
 extern crate slog;
+extern crate slog_async;
 extern crate slog_term;
 extern crate url;
 #[macro_use]
@@ -54,7 +54,7 @@ use clap::{Arg, App};
 use futures::Future;
 use futures::stream::Stream;
 
-use slog::DrainExt;
+use slog::Drain;
 
 use std::cell::RefCell;
 use std::net::SocketAddr;
@@ -74,7 +74,9 @@ use tasked_futures::TaskExecutor;
 
 lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
-        let drain = slog_term::streamer().compact().build().fuse();
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
     };
 }
@@ -200,7 +202,7 @@ fn main() {
 
         // Set up a new task for the connection. We do this early so that the logging is correct.
         let setup_future = futures::lazy(move || {
-            debug!(cloned_ctx.logger, "Accepted connection");
+            debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
 
             CONTEXT.with(|m| {
                 *m.borrow_mut() = Some(cloned_ctx);

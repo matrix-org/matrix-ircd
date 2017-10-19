@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use tokio_core::io::Io;
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
 use url::Url;
 
@@ -43,7 +43,7 @@ use tasked_futures::{TaskExecutorQueue, TaskExecutor, FutureTaskedExt, TaskedFut
 ///
 /// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
 /// on unrecoverable error).
-pub struct Bridge<IS: Io + 'static> {
+pub struct Bridge<IS: AsyncRead + AsyncWrite + 'static> {
     irc_conn: IrcUserConnection<IS>,
     matrix_client: MatrixClient,
     ctx: ConnectionContext,
@@ -55,13 +55,13 @@ pub struct Bridge<IS: Io + 'static> {
     joining_map: BTreeMap<String, String>,
 }
 
-impl<IS: Io> Bridge<IS> {
+impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
     /// HS with the given user name and password.
     ///
     /// The bridge won't process any IRC commands until the initial sync has finished.
-    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> impl Future<Item=Bridge<IS>, Error=io::Error> {
-        IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
+    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> Box<Future<Item=Bridge<IS>, Error=io::Error>> {
+        let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
         .and_then(move |mut user_connection| {
             MatrixClient::login(
                 handle.clone(), base_url, user_connection.user.clone(), user_connection.password.clone()
@@ -96,7 +96,9 @@ impl<IS: Io> Bridge<IS> {
             bridge.spawn_fn(|bridge| bridge.poll_irc());
             bridge.spawn_fn(|bridge| bridge.poll_matrix());
             Ok(bridge)
-        })
+        });
+
+        Box::new(f)
     }
 
     fn handle_irc_cmd(&mut self, line: IrcCommand) {
@@ -115,14 +117,14 @@ impl<IS: Io> Bridge<IS> {
                 }
             }
             IrcCommand::Join { channel } => {
-                info!(self.ctx.logger, "Joining channel"; "channel" => channel);
+                info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
 
                 let join_future = self.matrix_client.join_room(channel.as_str())
                     .into_tasked()
                     .map(move |room_join_response, bridge: &mut Bridge<IS>| {
                         let room_id = room_join_response.room_id;
 
-                        task_info!("Joined channel"; "channel" => channel, "room_id" => room_id);
+                        task_info!("Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
 
                         if let Some(mapped_channel) = bridge.mappings.room_id_to_channel(&room_id) {
                             if mapped_channel == &channel {
@@ -132,11 +134,11 @@ impl<IS: Io> Bridge<IS> {
                                 task_trace!("Already in IRC channel");
                             } else {
                                 // We respond to the join with a redirect!
-                                task_trace!("Redirecting channl"; "prev" => channel, "new" => *mapped_channel);
+                                task_trace!("Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
                                 bridge.irc_conn.write_redirect_join(&channel, mapped_channel);
                             }
                         } else {
-                            task_trace!("Waiting for room to come down sync"; "room_id" => room_id);
+                            task_trace!("Waiting for room to come down sync"; "room_id" => room_id.clone());
                             bridge.joining_map.insert(room_id, channel);
                         }
                     });
@@ -263,7 +265,7 @@ impl<IS: Io> Bridge<IS> {
     }
 }
 
-impl<IS: Io> TaskExecutor for Bridge<IS> {
+impl<IS: AsyncRead + AsyncWrite> TaskExecutor for Bridge<IS> {
     type Error = io::Error;
 
     fn task_executor_mut(&mut self) -> &mut TaskExecutorQueue<Self, io::Error> {
@@ -283,7 +285,7 @@ struct MappingStore {
 }
 
 impl MappingStore {
-    pub fn insert_nick<S: Io>(&mut self, irc_server: &mut IrcUserConnection<S>, nick: String, user_id: String) {
+    pub fn insert_nick<S: AsyncRead + AsyncWrite + 'static>(&mut self, irc_server: &mut IrcUserConnection<S>, nick: String, user_id: String) {
         self.matrix_uid_to_nick.insert(user_id.clone(), nick.clone());
         self.nick_matrix_uid.insert(nick.clone(), user_id.clone());
 
@@ -298,7 +300,7 @@ impl MappingStore {
         self.room_id_to_channel.get(room_id)
     }
 
-    pub fn create_or_get_channel_name_from_matrix<S: Io>(
+    pub fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
         &mut self, irc_server: &mut IrcUserConnection<S>, room: &MatrixRoom
     ) -> (String, bool) {
         let room_id = room.get_room_id();
@@ -355,7 +357,7 @@ impl MappingStore {
         (channel, true)
     }
 
-    pub fn create_or_get_nick_from_matrix<S: Io>(
+    pub fn create_or_get_nick_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
         &mut self, irc_server: &mut IrcUserConnection<S>, user_id: &str, display_name: &str
     ) -> String {
         if let Some(nick) = self.matrix_uid_to_nick.get(user_id) {

@@ -17,7 +17,7 @@ use futures::stream::Stream;
 
 use serde_json;
 
-use std::{io, str};
+use std::io;
 
 use super::protocol::SyncResponse;
 
@@ -60,7 +60,7 @@ impl MatrixSyncClient {
         task_trace!("Polled sync");
         loop {
             let sync_response: SyncResponse = {
-                let mut http_stream = &mut self.http_stream;
+                let http_stream = &mut self.http_stream;
 
                 let mut current_sync = if let Some(current_sync) = self.current_sync.take() {
                     current_sync
@@ -107,7 +107,7 @@ impl MatrixSyncClient {
                 })?
             };
 
-            task_trace!("Got sync response"; "next_token" => sync_response.next_batch);
+            task_trace!("Got sync response"; "next_token" => sync_response.next_batch.clone());
 
             self.next_token = Some(sync_response.next_batch.clone());
 
