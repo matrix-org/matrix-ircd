@@ -96,6 +96,11 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
         self.write_line(&line);
     }
 
+    pub fn write_part(&mut self, nick: &str, channel: &str) {
+        let line = format!(":{} PART {}", nick, channel);
+        self.write_line(&line);
+    }
+
     pub fn write_topic(&mut self, nick: &str, channel: &str, topic: &str) {
         self.write_numeric(Numeric::RplTopic, nick, &format!("{} :{}", channel, topic));
     }

@@ -140,6 +140,14 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
         self.attempt_to_write_join_response(&name);
     }
 
+    pub fn write_join(&mut self, username: &str, channel: &str) {
+        self.conn.write_join(&username, &channel);
+    }
+
+    pub fn write_part(&mut self, username: &str, channel: &str) {
+        self.conn.write_part(&username, &channel);
+    }
+
     fn attempt_to_write_join_response(&mut self, name: &str) -> bool {
         let IrcUserConnection { ref mut server_model, ref mut conn, .. } = *self;
 

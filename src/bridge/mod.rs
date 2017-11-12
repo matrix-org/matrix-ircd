@@ -187,51 +187,89 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
 
         for ev in &sync.timeline.events {
-            if ev.etype == "m.room.message" {
-                let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
-                    Some(x) => x,
-                    None    => {
-                        warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
-                        continue;
-                    }
-                };
-                let body = match ev.content.get("body").and_then(Value::as_str) {
-                    Some(x) => x,
-                    None    => {
-                        warn!(self.ctx.logger, "Message has no body"; "room" => room_id, "message" => format!("{:?}", ev));
-                        continue;
-                    }
-                };
-                let msgtype = match ev.content.get("msgtype").and_then(Value::as_str) {
-                    Some(x) => x,
-                    None    => {
-                        warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id, "message" => format!("{:?}", ev));
-                        continue;
-                    }
-                };
-                match msgtype {
-                    "m.text"  => self.irc_conn.send_message(&channel, sender_nick, body),
-                    "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body),
-                    "m.image" | "m.file" | "m.video" | "m.audio" => {
-                        let url = ev.content.get("url").and_then(Value::as_str);
-                        match url {
-                            Some(url) => self.irc_conn.send_message(&channel, sender_nick,
-                                                                    self.matrix_client.media_url(&url).as_str()),
-                            None      => warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
-                                                                                            "message" => format!("{:?}", ev))
+            match ev.etype.as_ref() {
+                "m.room.member" => {
+                    let userid = match ev.state_key {
+                        Some(ref uid) => uid,
+                        None      => {
+                            warn!(self.ctx.logger, "MemberEvent with no username, skipping"; "event" => format!("{:?}", ev));
+                            continue;
                         }
-                    },
-                    _ => {
-                        warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
-                        self.irc_conn.send_message(&channel, sender_nick, body);
-                    },
-                }
+                    };
+                    let displayname = match ev.content.get("displayname").and_then(Value::as_str) {
+                        Some(dname) => dname,
+                        None        => userid,
+                    };
+
+                    if let Some(membership) = ev.content.get("membership").and_then(Value::as_str) {
+                        match membership.as_ref() {
+                            "join" => {
+                                self.mappings.create_or_get_nick_from_matrix(&mut self.irc_conn, &userid, &displayname);
+                                let nickname = format!("{}!{}", &displayname, self.ircify_userid(&userid));
+                                self.irc_conn.write_join(&nickname, &channel);
+                            },
+                            "leave" => {
+                                if let Some(displayname) = self.mappings.get_nick_from_matrix(&ev.sender) {
+                                    let nickname = format!("{}!{}", &displayname, self.ircify_userid(&userid));
+                                    self.irc_conn.write_part(&nickname, &channel);
+                                }
+                            },
+                            _  => warn!(self.ctx.logger, "NYI room membership event"; "membership" => membership)
+                        }
+                    }
+                },
+                "m.room.message" => {
+                    let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
+                        Some(x) => x,
+                        None    => {
+                            warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+                            continue;
+                        }
+                    };
+                    let body = match ev.content.get("body").and_then(Value::as_str) {
+                        Some(x) => x,
+                        None    => {
+                            warn!(self.ctx.logger, "Message has no body"; "room" => room_id, "message" => format!("{:?}", ev));
+                            continue;
+                        }
+                    };
+                    let msgtype = match ev.content.get("msgtype").and_then(Value::as_str) {
+                        Some(x) => x,
+                        None    => {
+                            warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id, "message" => format!("{:?}", ev));
+                            continue;
+                        }
+                    };
+                    match msgtype {
+                        "m.text"  => self.irc_conn.send_message(&channel, sender_nick, body),
+                        "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body),
+                        "m.image" | "m.file" | "m.video" | "m.audio" => {
+                            let url = ev.content.get("url").and_then(Value::as_str);
+                            match url {
+                                Some(url) => self.irc_conn.send_message(&channel, sender_nick,
+                                                                        self.matrix_client.media_url(&url).as_str()),
+                                None      => warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
+                                                                                                "message" => format!("{:?}", ev))
+                            }
+                        },
+                        _ => {
+                            warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
+                            self.irc_conn.send_message(&channel, sender_nick, body);
+                        },
+                    }
+                },
+                _ => warn!(self.ctx.logger, "NYI timeline event"; "event" => format!("{:?}", ev))
             }
+
         }
 
         if !new {
             // TODO: Send down new state
         }
+    }
+
+    fn ircify_userid(&self, userid: &str) -> String {
+        userid[1..].replacen(":", "@", 1).replace(" ", "")
     }
 
     fn poll_irc(&mut self) -> Poll<(), io::Error> {
