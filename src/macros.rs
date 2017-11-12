@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(unused_macros)]
+
 macro_rules! task_log {
     ($lvl:expr, $($args:tt)+) => {{
         use CONTEXT;
 
         CONTEXT.with(|m| {
             if let Some(ref ctx) = m.borrow().as_ref() {
-                log!($lvl, ctx.logger, $($args)+)
+                log!(ctx.logger.as_ref(), $lvl, "", $($args)+)
             } else {
-                log!($lvl, ::DEFAULT_LOGGER, $($args)+)
+                log!(::DEFAULT_LOGGER, $lvl, "", $($args)+)
             }
         });
     }}

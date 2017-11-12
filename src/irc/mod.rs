@@ -28,14 +28,14 @@ pub use self::protocol::{Command, IrcCommand, IrcLine, Numeric};
 use ConnectionContext;
 use stream_fold::StreamFold;
 
-use tokio_core::io::Io;
+use tokio_io::{AsyncRead, AsyncWrite};
 
 use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
 use std::io;
 
-pub struct IrcUserConnection<S: Io> {
+pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: transport::IrcServerConnection<S>,
     pub user: String,
     pub nick: String,
@@ -55,15 +55,15 @@ struct UserNick {
     password: Option<String>,
 }
 
-impl<S: Io> IrcUserConnection<S> {
+impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
-    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> impl Future<Item=IrcUserConnection<S>, Error=io::Error> {
+    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<Future<Item=IrcUserConnection<S>, Error=io::Error>> {
         trace!(ctx.logger, "Await login");
         let irc_conn = transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
 
         let ctx_clone = ctx.clone();
 
-        StreamFold::new(irc_conn, UserNick::default(), move |cmd, mut user_nick| {
+        let f = StreamFold::new(irc_conn, UserNick::default(), move |cmd, mut user_nick| {
             trace!(ctx.logger, "Got command"; "command" => cmd.command());
             match cmd {
                 IrcCommand::Nick { nick } => user_nick.nick = Some(nick),
@@ -108,9 +108,9 @@ impl<S: Io> IrcUserConnection<S> {
                 };
 
                 trace!(ctx_clone.logger, "IRC conn values";
-                    "nick" => user_conn.nick,
-                    "user" => user_conn.user,
-                    "password" => user_conn.password,
+                    "nick" => user_conn.nick.clone(),
+                    "user" => user_conn.user.clone(),
+                    "password" => user_conn.password.clone(),
                 );
 
                 Ok(user_conn)
@@ -118,7 +118,9 @@ impl<S: Io> IrcUserConnection<S> {
                 info!(ctx_clone.logger, "IRC conn died during login");
                 Err(io::Error::new(io::ErrorKind::UnexpectedEof, "IRC stream ended during login"))
             }
-        })
+        });
+
+        Box::new(f)
     }
 
     pub fn nick_exists(&self, nick: &str) -> bool {

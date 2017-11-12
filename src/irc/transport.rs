@@ -24,10 +24,10 @@ use std::fmt::Write;
 
 use super::protocol::{Numeric, IrcCommand};
 
-use tokio_core::io::Io;
+use tokio_io::{AsyncRead, AsyncWrite};
 
 
-pub struct IrcServerConnection<S: Io> {
+pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
     conn: S,
     read_buffer: Vec<u8>,
     inner: Arc<Mutex<IrcServerConnectionInner>>,
@@ -36,7 +36,7 @@ pub struct IrcServerConnection<S: Io> {
     server_name: String,
 }
 
-impl<S: Io> IrcServerConnection<S> {
+impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
     pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
             conn: conn,
@@ -55,13 +55,13 @@ impl<S: Io> IrcServerConnection<S> {
             trace!(self.ctx.logger, "Writing line"; "line" => line);
 
             {
-                let mut v = inner.write_buffer.get_mut();
+                let v = inner.write_buffer.get_mut();
                 v.extend_from_slice(line.as_bytes());
                 v.push(b'\n');
             }
 
             if let Some(ref t) = inner.write_notify {
-                t.unpark();
+                t.notify();
             }
         }
         self.poll_write().ok();
@@ -168,7 +168,7 @@ impl<S: Io> IrcServerConnection<S> {
             let mut inner = self.inner.lock().unwrap();
 
             if inner.write_notify.is_none() {
-                inner.write_notify = Some(task::park());
+                inner.write_notify = Some(task::current());
             }
 
             if inner.write_buffer.get_ref().is_empty() {
@@ -194,7 +194,7 @@ impl<S: Io> IrcServerConnection<S> {
     }
 }
 
-impl<S: Io> Stream for IrcServerConnection<S> {
+impl<S: AsyncRead + AsyncWrite> Stream for IrcServerConnection<S> {
     type Item = IrcCommand;
     type Error = io::Error;
 
