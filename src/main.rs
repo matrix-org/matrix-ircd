@@ -16,37 +16,30 @@
 //! directly with a Matrix home server.
 
 #[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate serde;
-#[macro_use]
 extern crate futures;
 #[macro_use]
 extern crate tokio_core;
 extern crate tokio_proto;
 extern crate tokio_io;
 extern crate tokio_tls;
-extern crate tokio_dns;
 #[macro_use]
 extern crate slog;
 extern crate slog_async;
 extern crate slog_term;
-extern crate url;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate pest;
-#[macro_use]
-extern crate quick_error;
 extern crate openssl;
 #[macro_use]
 extern crate clap;
-extern crate httparse;
-extern crate netbuf;
 extern crate rand;
 extern crate tasked_futures;
 extern crate native_tls;
 extern crate regex;
+extern crate glitch_in_the_matrix as gm;
+#[macro_use]
+extern crate failure;
 
 
 use clap::{Arg, App};
@@ -92,10 +85,7 @@ task_local! {
 pub mod macros;
 pub mod bridge;
 pub mod irc;
-pub mod matrix;
 pub mod stream_fold;
-pub mod http;
-
 
 /// A task local context describing the connection (from an IRC client).
 #[derive(Clone)]
@@ -151,11 +141,6 @@ fn main() {
             .help("The base url of the Matrix HS")
             .required(true)
             .takes_value(true)
-            .validator(|hs| {
-                url::Url::parse(&hs)
-                .map(|_| ())
-                .map_err(|err| format!("Invalid url: {}", err))
-            })
         )
         .get_matches();
 
@@ -165,7 +150,7 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap_or("127.0.0.1:5999");
     let addr = bind_addr.parse::<SocketAddr>().unwrap();
-    let matrix_url = url::Url::parse(matches.value_of("MATRIX_HS").unwrap()).unwrap();
+    let matrix_url = matches.value_of("MATRIX_HS").unwrap().to_string();
 
     let mut tls = false;
     let tls_acceptor = if let Some(pkcs12_file) = matches.value_of("PKCS12") {
@@ -245,6 +230,7 @@ fn main() {
         } else {
             // Same as above except with less TLS.
             let future = setup_future
+            .map_err(|e| e.into())
             .and_then(move |socket| {
                 bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
             })
