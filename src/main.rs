@@ -65,8 +65,7 @@ use std::sync::Arc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 
-use native_tls::{TlsAcceptor, Pkcs12};
-use tokio_tls::TlsAcceptorExt;
+use native_tls::{TlsAcceptor, Identity};
 
 use tasked_futures::TaskExecutor;
 
@@ -105,7 +104,7 @@ pub struct ConnectionContext {
 }
 
 
-fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Pkcs12, String> {
+fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, String> {
     File::open(&cert_file)
     .and_then(|mut file| {
         let mut buf = Vec::new();
@@ -114,7 +113,7 @@ fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Pkcs12, Stri
     })
     .map_err(|err| format!("Failed to load Pkcs12: {}", err))
     .and_then(|buf| {
-        Pkcs12::from_der(&buf, password)
+        Identity::from_pkcs12(&buf, password)
         .map_err(|err| format!("Failed to load Pkcs12: {}", err))
     })
 }
@@ -174,8 +173,9 @@ fn main() {
         let pass = matches.value_of("PASSWORD").unwrap();
 
         let pkcs12 = load_pkcs12_from_file(pkcs12_file, pass).expect("error reading pkcs12");
-        let acceptor = TlsAcceptor::builder(pkcs12).unwrap().build().unwrap();
-        Some(Arc::new(acceptor))
+        let acceptor = TlsAcceptor::builder(pkcs12).build().unwrap();
+        let tokio_acceptor = tokio_tls::TlsAcceptor::from(acceptor);
+        Some(Arc::new(tokio_acceptor))
     } else {
         None
     };
@@ -221,7 +221,7 @@ fn main() {
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
             let future = setup_future.and_then(move |socket| {
-                acceptor.accept_async(socket)
+                acceptor.accept(socket)
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
             })
             .map_err(move |err| {

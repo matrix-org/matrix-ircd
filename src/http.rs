@@ -26,7 +26,6 @@ use std::sync::{Arc, Mutex};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_dns::tcp_connect;
-use tokio_tls::TlsConnectorExt;
 
 use native_tls::TlsConnector;
 
@@ -56,8 +55,8 @@ impl HttpClient {
                 tcp_connect(
                     (host_clone.as_str(), port), handle.remote().clone()
                 ).and_then(move |stream| {
-                    let connector = TlsConnector::builder().unwrap().build().unwrap();
-                    connector.connect_async(&host_clone, stream)
+                    let connector = tokio_tls::TlsConnector::from(TlsConnector::builder().build().unwrap());
+                    connector.connect(&host_clone, stream)
                     .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
                 })
             }));
