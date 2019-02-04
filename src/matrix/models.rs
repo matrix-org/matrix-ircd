@@ -13,7 +13,7 @@
 // limitations under the License.
 
 
-use matrix::protocol::{Event, JoinedRoomSyncResponse};
+use crate::matrix::protocol::{Event, JoinedRoomSyncResponse};
 
 use std::collections::{BTreeMap, BTreeSet};
 

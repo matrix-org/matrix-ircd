@@ -25,7 +25,7 @@ use tokio_core::reactor::Handle;
 
 use url::Url;
 
-use http::{Request, HttpClient, HttpResponseFuture};
+use crate::http::{Request, HttpClient, HttpResponseFuture};
 
 
 pub struct MatrixSyncClient {

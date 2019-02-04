@@ -31,7 +31,7 @@ use serde_json;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use http::{Request, HttpClient};
+use crate::http::{Request, HttpClient};
 
 use rand::{thread_rng, Rng};
 

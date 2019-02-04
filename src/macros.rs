@@ -16,13 +16,13 @@
 
 macro_rules! task_log {
     ($lvl:expr, $($args:tt)+) => {{
-        use CONTEXT;
+        use crate::CONTEXT;
 
         CONTEXT.with(|m| {
             if let Some(ref ctx) = m.borrow().as_ref() {
                 log!(ctx.logger.as_ref(), $lvl, "", $($args)+)
             } else {
-                log!(::DEFAULT_LOGGER, $lvl, "", $($args)+)
+                log!(crate::DEFAULT_LOGGER, $lvl, "", $($args)+)
             }
         });
     }}

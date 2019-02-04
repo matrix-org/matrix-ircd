@@ -25,8 +25,8 @@ mod models;
 pub use self::protocol::{Command, IrcCommand, IrcLine, Numeric};
 
 
-use ConnectionContext;
-use stream_fold::StreamFold;
+use crate::ConnectionContext;
+use crate::stream_fold::StreamFold;
 
 use tokio_io::{AsyncRead, AsyncWrite};
 

@@ -16,16 +16,16 @@
 //! The module responsible for mapping IRC and Matrix onto each other.
 
 
-use ConnectionContext;
+use crate::ConnectionContext;
 
 use futures::{Async, Future, Poll};
 use futures::stream::Stream;
 
-use irc::{IrcCommand, IrcUserConnection};
+use crate::irc::{IrcCommand, IrcUserConnection};
 
-use matrix::{LoginError, MatrixClient};
-use matrix::protocol::{SyncResponse, JoinedRoomSyncResponse};
-use matrix::Room as MatrixRoom;
+use crate::matrix::{LoginError, MatrixClient};
+use crate::matrix::protocol::{SyncResponse, JoinedRoomSyncResponse};
+use crate::matrix::Room as MatrixRoom;
 
 use std::io;
 use std::collections::BTreeMap;
