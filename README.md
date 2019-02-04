@@ -16,7 +16,7 @@ See the GitHub issues page for a more detailed breakdown of what is left to do.
 
 ## Building
 
-Matrix IRCd currently requires using a nightly compiler of rust<sup>1</sup>.
+Matrix IRCd requires Rust v1.31.0 or later.
 Building and installing uses the standard `cargo` commands.
 
 To run a plain debug version:
@@ -30,10 +30,6 @@ To build with trace logging:
 ```
 cargo build --features trace_logging
 ```
-
-
-<sup>1</sup> It is recommended to use a tool such as [rustup.rs](https://www.rustup.rs) to
-manage the rust compiler toolchains. See ["Working with nightly Rust"](https://github.com/rust-lang-nursery/rustup.rs#working-with-nightly-rust) for instructions on how to do so with rustup.
 
 
 ## Usage
