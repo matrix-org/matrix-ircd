@@ -6,6 +6,8 @@ An IRCd implementation backed by Matrix. Inspired by [PTO](https://github.com/td
 
 Join the discussion on the Matrix channel: [#matrix-ircd:matrix.org](https://matrix.to/#/#matrix-ircd:matrix.org)
 
+This is project is almost the inverse of matrix-appservice-irc. **matrix-ircd** lets you use any standard IRC Client to communicate with Matrix, whereas **matrix-appservice-irc** is primarily a way to use a Matrix client to communicate with IRC.
+
 ## Status
 
 **This is a work in progress.** Matrix IRCd should be stable enough to hack on
