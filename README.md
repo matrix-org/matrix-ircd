@@ -63,6 +63,11 @@ on TLS, otherwise it will use plain TCP.
 The credentials for the matrix account are taken from the user name and server
 password specified by the IRC connection.
 
+**Quassel Users**
+
+You will need to put your username in the ident field of the identity you're using to connect to Matrix,
+which you can find under Identities, then Advanced.
+
 
 ## Development
 
