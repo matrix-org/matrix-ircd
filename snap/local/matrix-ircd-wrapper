@@ -1,0 +1,25 @@
+#!/bin/bash
+
+if [ -f "${SNAP_COMMON}/matrix-ircd.env" ]; then
+    source "${SNAP_COMMON}/matrix-ircd.env"
+else
+    echo "No matrix-ircd.env file found in ${SNAP_COMMON}"
+    exit 1
+fi
+
+ARGS=""
+
+if [ ! -z "$MATRIX_IRCD_HOMESERVER" ]; then
+    ARGS="${ARGS} --url ${MATRIX_IRCD_HOMESERVER}"
+fi
+
+if [ ! -z "$MATRIX_IRCD_BIND" ]; then
+    ARGS="${ARGS} --bind ${MATRIX_IRCD_BIND}"
+fi
+
+if [ ! -z "$MATRIX_IRCD_PASSWORD" ] && [ ! -z "$MATRIX_IRCD_PKCS12" ]; then
+    ARGS="${ARGS} --password ${MATRIX_IRCD_PASSWORD} --pkcs12 ${SNAP_COMMON}/${MATRIX_IRCD_PKCS12}"
+fi
+
+echo "Running matrix-ircd with ${ARGS}"
+matrix-ircd ${ARGS}

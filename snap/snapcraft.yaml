@@ -1,0 +1,33 @@
+---
+name: matrix-ircd
+base: core18
+version: git
+summary: An IRC client bridge into Matrix
+description: |
+    This is project is almost the inverse of matrix-appservice-irc.
+    matrix-ircd lets you use any standard IRC Client to communicate with Matrix,
+    as a Matrix client.
+
+grade: stable
+confinement: strict
+
+apps:
+  matrix-ircd:
+    command: matrix-ircd-wrapper
+    plugs: [network-bind, network]
+    daemon: simple
+parts:
+  matrix-ircd:
+    source: .
+    plugin: rust
+    build-packages:
+      - pkg-config
+      - libssl-dev
+  matrix-ircd-wrapper:
+    source: snap/local
+    source-type: local
+    plugin: dump
+    after:
+      - matrix-ircd
+    organize:
+      matrix-ircd-wrapper: bin/matrix-ircd-wrapper
