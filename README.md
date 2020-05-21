@@ -63,6 +63,49 @@ on TLS, otherwise it will use plain TCP.
 The credentials for the matrix account are taken from the user name and server
 password specified by the IRC connection.
 
+## Snap
+
+This software includes packaging information for [Snapcraft](https://snapcraft.io).
+Building the snap package is as simple as installing as running `snapcraft` in the
+top-level directory of this repository. The resulting snap, until the snap is published
+on `snapcraft.io`, can be installed locally by using the `--dangerous` option to
+`snap install`. `--dangerous` is only needed as local snaps are not cryptographically
+signed.
+
+The `matrix-ircd` daemon is configured in the snap package to read an environment file,
+which allows customisation of the parameters documented in the usage section. The
+environment file is a bash script which sets several environment variable, which are
+loaded by the systemd service file which runs `matrix-ircd` inside the snap environment.
+
+To configure the service, create a file in `/var/snap/matrix-ircd/common` named
+`matrix-ircd.env`, and set the following variables inside:
+
+`MATRIX_IRCD_HOMESERVER`
+Maps to the `--url` parameter, points to the home server you wold like `matrix-ircd` to
+connect to.
+Example: `MATRIX_IRCD_HOMESERVER=https://example.homeserver:8989`
+
+`MATRIX_IRCD_BIND`
+Maps to the `--bind` parameter, sets the IP and port you would like `matrix-ircd` to listen
+on for IRC connections.
+Example: `MATRIX_IRCD_BIND=0.0.0.0:9001`
+
+If you would like to use TLS, both of the following settings will need to be set.
+If you would not like to use TLS, do not include these settings in your environment file.
+
+`MATRIX_IRCD_PASSWORD`
+Sets the password used to access the PKCS#12 certificate bundle.
+Example: `MATRIX_IRCD_PASSWORD=Passw0rd`
+
+`MATRIX_IRCD_PKCS12`
+Sets the filename of the PKCS#12 certificate bundle. This file must be located in the
+`/var/snap/matrix-ircd/common` directory.
+Example: `matrix-ircd.pfx`
+
+With all of these parameters set, you should be able to start the service with:
+`systemctl start snap.matrix-ircd.matrix-ircd`
+Any errors with your configuration will be record in the system's `journald` logs
+for the service.
 
 ## Development
 
