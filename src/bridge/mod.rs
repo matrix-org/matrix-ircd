@@ -145,7 +145,18 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                 // TODO: Handle failure of join. Ensure that joining map is cleared.
                 self.spawn(join_future);
             }
-            // TODO: Handle PART
+            IrcCommand::Part { channel } => {
+                if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
+                    info!(self.ctx.logger, "Leaving channel"; "channel" => room_id.as_str());
+                    let logger = self.ctx.logger.clone();
+                    self.handle.spawn(
+                        self.matrix_client.leave_room(room_id.as_str())
+                        .map(|_| ()).map_err(move |err| warn!(logger, "Failed to part: {}", err))
+                    );
+                } else {
+                    warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
+                }
+            }
             c => {
                 warn!(self.ctx.logger, "Ignoring IRC command"; "command" => c.command());
             }
