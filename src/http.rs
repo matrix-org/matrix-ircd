@@ -69,7 +69,7 @@ impl HttpClient {
         }
 
         HttpClient {
-            inner: inner,
+            inner
         }
     }
 
@@ -112,21 +112,21 @@ impl Default for HttpClientInner {
 struct ReconnectingStream<T: AsyncRead + AsyncWrite, F> {
     inner: Arc<Mutex<HttpClientInner>>,
     connection_state: ConnectionState<T>,
-    reconnect_func: Box<FnMut(&mut Handle) -> F>,
+    reconnect_func: Box<dyn FnMut(&mut Handle) -> F>,
     host: String,
     handle: Handle,
 }
 
 
 impl<T, F> ReconnectingStream<T, F> where T: AsyncRead + AsyncWrite + 'static, F: Future<Item=T, Error=io::Error> + 'static {
-    pub fn spawn(mut handle: Handle, inner: Arc<Mutex<HttpClientInner>>, host: String, mut reconnect_func: Box<FnMut(&mut Handle) -> F>) {
+    pub fn spawn(mut handle: Handle, inner: Arc<Mutex<HttpClientInner>>, host: String, mut reconnect_func: Box<dyn FnMut(&mut Handle) -> F>) {
         let conn_state = ConnectionState::Connecting { future: Box::new((reconnect_func)(&mut handle)) };
         handle.spawn(ReconnectingStream {
-            inner: inner,
+            inner,
             connection_state: conn_state,
-            reconnect_func: reconnect_func,
+            reconnect_func,
             handle: handle.clone(),
-            host: host,
+            host,
         });
     }
 }
@@ -170,7 +170,7 @@ impl<T, F> Future for ReconnectingStream<T, F> where T: AsyncRead + AsyncWrite, 
 
 enum ConnectionState<T: AsyncRead + AsyncWrite> {
     Connected { handler: HttpClientHandler<T> },
-    Connecting { future: Box<Future<Item=T, Error=io::Error>> }
+    Connecting { future: Box<dyn Future<Item=T, Error=io::Error>> }
 }
 
 
@@ -187,11 +187,11 @@ struct HttpClientHandler<T: AsyncRead + AsyncWrite> {
 impl<T: AsyncRead + AsyncWrite> HttpClientHandler<T> {
     pub fn new(inner: Arc<Mutex<HttpClientInner>>, host: String, stream: T) -> HttpClientHandler<T> {
         HttpClientHandler {
-            inner: inner,
+            inner,
             write_buffer: netbuf::Buf::new(),
             requests: VecDeque::new(),
-            stream: stream,
-            host: host,
+            stream,
+            host,
             client_reader: HttpParser::new(),
         }
     }
@@ -402,7 +402,7 @@ impl HttpParser {
 fn clone_io_error(err: &io::Error) -> io::Error {
     let kind = err.kind();
     if let Some(inner) = err.get_ref() {
-        io::Error::new(kind, inner.description().to_string())
+        io::Error::new(kind, inner.to_string())
     } else {
         io::Error::new(kind, "")
     }

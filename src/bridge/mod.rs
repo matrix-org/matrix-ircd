@@ -60,7 +60,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// HS with the given user name and password.
     ///
     /// The bridge won't process any IRC commands until the initial sync has finished.
-    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> Box<Future<Item=Bridge<IS>, Error=io::Error>> {
+    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> Box<dyn Future<Item=Bridge<IS>, Error=io::Error>> {
         let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
         .and_then(move |mut user_connection| {
             MatrixClient::login(
@@ -315,7 +315,7 @@ impl MappingStore {
                 alias.into()
             } else if let Some(name) = room.get_name() {
                 let stripped_name: String = name.chars().filter(|c| match *c {
-                    '\x00' ... '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                    '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
                     _ => true,
                 }).collect();
 
@@ -365,14 +365,14 @@ impl MappingStore {
         }
 
         let mut nick: String = display_name.chars().filter(|c| match *c {
-            '\x00' ... '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+            '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
             _ => true,
         }).collect();
 
 
         if nick.len() < 3 {
             nick = user_id.chars().filter(|c| match *c {
-                '\x00' ... '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
                 _ => true,
             }).collect();
         }

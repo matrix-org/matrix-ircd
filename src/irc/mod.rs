@@ -57,7 +57,7 @@ struct UserNick {
 
 impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
-    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<Future<Item=IrcUserConnection<S>, Error=io::Error>> {
+    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<dyn Future<Item=IrcUserConnection<S>, Error=io::Error>> {
         trace!(ctx.logger, "Await login");
         let irc_conn = transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
 

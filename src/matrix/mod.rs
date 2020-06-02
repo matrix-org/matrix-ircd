@@ -62,11 +62,11 @@ impl MatrixClient {
     pub fn new(handle: Handle, http_stream: HttpClient, base_url: &Url, user_id: String, access_token: String) -> MatrixClient {
         MatrixClient {
             url: base_url.clone(),
-            user_id: user_id,
+            user_id,
             access_token: access_token.clone(),
             sync_client: sync::MatrixSyncClient::new(handle, base_url, access_token),
             rooms: BTreeMap::new(),
-            http_stream: http_stream,
+            http_stream ,
         }
     }
 
@@ -76,7 +76,7 @@ impl MatrixClient {
     }
 
     /// Create a session by logging in with a user name and password.
-    pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> Box<Future<Item=MatrixClient, Error=LoginError>> {
+    pub fn login(handle: Handle, base_url: Url, user: String, password: String) -> Box<dyn Future<Item=MatrixClient, Error=LoginError>> {
         let host = base_url.host_str().expect("expected host in base_url").to_string();
         let port = base_url.port_or_known_default().unwrap();
         let tls = match base_url.scheme() {
@@ -108,7 +108,7 @@ impl MatrixClient {
         Box::new(f)
     }
 
-    pub fn send_text_message(&mut self, room_id: &str, body: String) -> Box<Future<Item=protocol::RoomSendResponse, Error=io::Error>> {
+    pub fn send_text_message(&mut self, room_id: &str, body: String) -> Box<dyn Future<Item=protocol::RoomSendResponse, Error=io::Error>> {
         let msg_id = thread_rng().gen::<u16>();
         let mut url = self.url.join(&format!("/_matrix/client/r0/rooms/{}/send/m.room.message/mircd-{}", room_id, msg_id))
             .expect("Unable to construct a valid API url");
@@ -125,7 +125,7 @@ impl MatrixClient {
         Box::new(f)
     }
 
-    pub fn join_room(&mut self, room_id: &str) -> Box<Future<Item=protocol::RoomJoinResponse, Error=io::Error>> {
+    pub fn join_room(&mut self, room_id: &str) -> Box<dyn Future<Item=protocol::RoomJoinResponse, Error=io::Error>> {
         let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
         let mut url = self.url.join(&format!("/_matrix/client/r0/join/{}", roomid_encoded))
             .expect("Unable to construct a valid API url");
@@ -181,7 +181,7 @@ impl MatrixClient {
 
 
 fn do_json_post<I: Serialize, O: DeserializeOwned + 'static>(method: &'static str, stream: &mut HttpClient, url: &Url, input: &I)
-    -> Box<Future<Item=O, Error=JsonPostError>>
+    -> Box<dyn Future<Item=O, Error=JsonPostError>>
 {
     let f = stream.send_request(Request {
         method: method,

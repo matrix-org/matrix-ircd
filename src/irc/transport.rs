@@ -39,12 +39,12 @@ pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
 impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
     pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
-            conn: conn,
+            conn,
             read_buffer: Vec::with_capacity(1024),
             inner: Arc::new(Mutex::new(IrcServerConnectionInner::new())),
             closed: false,
             ctx: context,
-            server_name: server_name,
+            server_name,
         }
     }
 
@@ -106,7 +106,7 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
             for &(nick, op) in iter {
                 write!(line, "{}{} ", if op {"@"} else {""}, &nick).unwrap();
             }
-            line.trim();
+            let line = line.trim();
             self.write_numeric(Numeric::RplNamreply, nick, &line);
         }
         self.write_numeric(Numeric::RplEndofnames, nick, &format!("{} :End of /NAMES", channel));
@@ -118,7 +118,7 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
                 let to_return = self.read_buffer.drain(..pos + 1).collect();
                 match String::from_utf8(to_return) {
                     Ok(line) => {
-                        let line = line.trim_right().to_string();
+                        let line = line.trim_end().to_string();
                         if let Ok(irc_line) = line.parse() {
                             trace!(self.ctx.logger, "Got IRC line"; "line" => line);
                             return Ok(Async::Ready(irc_line));

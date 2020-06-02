@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 clap = "2.32.0"
 futures = "0.1.25"
+futures3 = {version="0.3.5", package="futures", features=["compat"]}
 httparse = "1.3.3"
 lazy_static = "1.2.0"
 native-tls = "0.2.2"
