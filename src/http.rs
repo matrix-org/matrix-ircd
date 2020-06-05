@@ -228,7 +228,7 @@ impl<T: AsyncRead + AsyncWrite> HttpClientHandler<T> {
                 self.write_buffer.write_to(&mut self.stream)?;
             }
 
-            let resp = try_ready!(self.client_reader.poll_for_response(&mut self.stream));
+            let resp = futures::try_ready!(self.client_reader.poll_for_response(&mut self.stream));
             if let Some(future) = self.requests.pop_front() {
                 future.send(Ok(resp)).ok();  // The consumer got dropped, which is probably fine
             } else {
@@ -276,7 +276,7 @@ impl HttpParser {
             match self.curr_state {
                 HttpStreamState::Headers => {
                     if self.response_buffer.is_empty() {
-                        let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                        let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
                             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF while waiting for new response"));
                         }
@@ -327,7 +327,7 @@ impl HttpParser {
                     if let Some(bytes_read) = bytes_read_opt {
                         self.response_buffer.consume(bytes_read);
                     } else {
-                        let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                        let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                         if num_bytes == 0 {
                             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF parsing headers"));
                         }
@@ -350,7 +350,7 @@ impl HttpParser {
                         }
                     }
 
-                    let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                    let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                     if num_bytes == 0 {
                         if let HttpStreamState::RawData(None) = self.curr_state {
                             self.curr_state = HttpStreamState::Headers;
@@ -389,7 +389,7 @@ impl HttpParser {
                         Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "HTTP invalid chunked body")),
                     }
 
-                    let num_bytes = try_ready!(read_into_vec(stream, &mut self.response_buffer));
+                    let num_bytes = futures::try_ready!(read_into_vec(stream, &mut self.response_buffer));
                     if num_bytes == 0 {
                         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Unexpected EOF parsing chunked body"));
                     }
@@ -459,7 +459,7 @@ enum HttpStreamState {
 
 
 fn read_into_vec<R: io::Read>(stream: &mut R, buf: &mut netbuf::Buf) -> Poll<usize, io::Error> {
-    let size = try_nb!(buf.read_from(stream));
+    let size = tokio_core::try_nb!(buf.read_from(stream));
     Ok(Async::Ready(size))
 }
 
@@ -479,7 +479,7 @@ mod tests {
         fn new(mut chunks: Vec<Option<&'a [u8]>>) -> TestReader<'a> {
             chunks.reverse();
             TestReader {
-                chunks: chunks,
+                chunks,
             }
         }
     }

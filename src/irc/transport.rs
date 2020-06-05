@@ -27,6 +27,7 @@ use super::protocol::{Numeric, IrcCommand};
 use tokio_io::{AsyncRead, AsyncWrite};
 
 
+
 pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
     conn: S,
     read_buffer: Vec<u8>,
@@ -179,12 +180,12 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
 
             let bytes_written = {
                 let to_write = &inner.write_buffer.get_ref()[pos..];
-                try_nb!(self.conn.write(to_write))
+                tokio_core::try_nb!(self.conn.write(to_write))
             };
 
             inner.write_buffer.set_position((pos + bytes_written) as u64);
 
-            try_nb!(self.conn.flush());
+            tokio_core::try_nb!(self.conn.flush());
         }
     }
 }

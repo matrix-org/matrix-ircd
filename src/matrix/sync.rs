@@ -27,6 +27,8 @@ use url::Url;
 
 use crate::http::{Request, HttpClient, HttpResponseFuture};
 
+use slog::*;
+
 
 pub struct MatrixSyncClient {
     url: Url,
@@ -49,7 +51,7 @@ impl MatrixSyncClient {
 
         MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
-            access_token: access_token,
+            access_token,
             next_token: None,
             http_stream: HttpClient::new(host.into(), port, tls, handle),
             current_sync: None,
@@ -123,7 +125,7 @@ impl Stream for MatrixSyncClient {
     fn poll(&mut self) -> Poll<Option<SyncResponse>, io::Error> {
         task_trace!("Matrix Sync Polled");
 
-        let res = try_ready!(self.poll_sync());
+        let res = futures::try_ready!(self.poll_sync());
         Ok(Async::Ready(Some(res)))
     }
 }

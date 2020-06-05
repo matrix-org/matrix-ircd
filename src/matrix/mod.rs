@@ -37,6 +37,8 @@ use rand::{thread_rng, Rng};
 
 use regex::Regex;
 
+use quick_error::quick_error;
+
 
 pub mod protocol;
 mod models;
@@ -88,8 +90,8 @@ impl MatrixClient {
         let mut http_stream = HttpClient::new(host, port, tls, handle.clone());
 
         let f = do_json_post("POST", &mut http_stream, &base_url.join("/_matrix/client/r0/login").unwrap(), &protocol::LoginPasswordInput {
-            user: user,
-            password: password,
+            user,
+            password,
             login_type: "m.login.password".into(),
         }).map_err(move |err| {
             match err {
@@ -117,7 +119,7 @@ impl MatrixClient {
             .append_pair("access_token", &self.access_token);
 
         let f = do_json_post("PUT", &mut self.http_stream, &url, &protocol::RoomSendInput {
-            body: body,
+            body,
             msgtype: "m.text".into(),
         })
         .map_err(JsonPostError::into_io_error);
@@ -145,8 +147,11 @@ impl MatrixClient {
     }
 
     pub fn media_url(&self, url: &str) -> String {
-        let re = Regex::new("^mxc://([^/]+/[^/]+)$").unwrap();
-        if let Some(captures) = re.captures(url) {
+        lazy_static::lazy_static!{
+            static ref RE: Regex = Regex::new("^mxc://([^/]+/[^/]+)$").unwrap();
+        }
+        //let re = Regex::new("^mxc://([^/]+/[^/]+)$").unwrap();
+        if let Some(captures) = RE.captures(url) {
             self.url.join("/_matrix/media/v1/download/")
                 .unwrap()
                 .join(&captures[1])
@@ -158,7 +163,7 @@ impl MatrixClient {
     }
 
     fn poll_sync(&mut self) -> Poll<Option<protocol::SyncResponse>, io::Error> {
-        let mut resp = try_ready!(self.sync_client.poll());
+        let mut resp = futures::try_ready!(self.sync_client.poll());
         if let Some(ref mut sync_response) = resp {
             for (room_id, sync) in &mut sync_response.rooms.join {
                 sync.timeline.events.retain(|ev| {
@@ -184,7 +189,7 @@ fn do_json_post<I: Serialize, O: DeserializeOwned + 'static>(method: &'static st
     -> Box<dyn Future<Item=O, Error=JsonPostError>>
 {
     let f = stream.send_request(Request {
-        method: method,
+        method,
         path: format!("{}?{}", url.path(), url.query().unwrap_or("")),
         headers: vec![("Content-Type".into(), "application/json".into())],
         body: serde_json::to_vec(input).expect("input to be valid json"),

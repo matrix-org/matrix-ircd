@@ -15,42 +15,24 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate serde;
-#[macro_use]
-extern crate futures;
-#[macro_use]
-extern crate tokio_core;
-extern crate tokio_proto;
-extern crate tokio_io;
-extern crate tokio_tls;
-extern crate tokio_dns;
+// TODO: move this one to `use` format as well. It turns out its actually pretty difficult with 
+// ~50 errors and importing the macros in the files still results in errors
 #[macro_use]
 extern crate slog;
-extern crate slog_async;
-extern crate slog_term;
-extern crate url;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate pest;
-#[macro_use]
-extern crate quick_error;
-extern crate openssl;
-#[macro_use]
-extern crate clap;
-extern crate httparse;
-extern crate netbuf;
-extern crate rand;
-extern crate tasked_futures;
-extern crate native_tls;
-extern crate regex;
 
+use tokio_core;
+use tokio_tls;
+use slog_async;
+use slog_term;
+use url;
+use lazy_static;
+use clap;
+use tasked_futures;
+use native_tls;
 
 use clap::{Arg, App};
 
+use futures;
 use futures::Future;
 use futures::stream::Stream;
 
@@ -70,8 +52,7 @@ use native_tls::{TlsAcceptor, Identity};
 use tasked_futures::TaskExecutor;
 
 
-
-lazy_static! {
+lazy_static::lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
         let decorator = slog_term::TermDecorator::new().build();
         let drain = slog_term::CompactFormat::new(decorator).build().fuse();
@@ -81,7 +62,7 @@ lazy_static! {
 }
 
 
-task_local! {
+futures::task_local! {
     // A task local context describing the connection (from an IRC client).
     static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
 }
@@ -120,8 +101,8 @@ fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, St
 
 fn main() {
     let matches = App::new("IRC Matrix Daemon")
-        .version(crate_version!())
-        .author(crate_authors!())
+        .version(clap::crate_version!())
+        .author(clap::crate_authors!())
         .arg(Arg::with_name("BIND")
             .short("b")
             .long("bind")

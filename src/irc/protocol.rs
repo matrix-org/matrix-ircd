@@ -17,6 +17,8 @@
 use slog::{Record, Value, Serializer};
 use slog::Error as SlogSerError;
 
+use pest::{grammar, impl_rdp};
+
 use std::convert::From;
 use std::str;
 use std::str::FromStr;

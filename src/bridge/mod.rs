@@ -36,6 +36,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
 use url::Url;
 
+
 use tasked_futures::{TaskExecutorQueue, TaskExecutor, FutureTaskedExt, TaskedFuture};
 
 
@@ -69,11 +70,11 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                 match res {
                     Ok(matrix_client) => Ok(Bridge {
                         irc_conn: user_connection,
-                        matrix_client: matrix_client,
-                        ctx: ctx,
+                        matrix_client ,
+                        ctx,
                         closed: false,
                         mappings: MappingStore::default(),
-                        handle: handle,
+                        handle,
                         is_first_sync: true,
                         executor_queue: TaskExecutorQueue::default(),
                         joining_map: BTreeMap::new(),
@@ -242,7 +243,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
 
         loop {
-            if let Some(line) = try_ready!(self.irc_conn.poll()) {
+            if let Some(line) = futures::try_ready!(self.irc_conn.poll()) {
                 self.handle_irc_cmd(line);
             } else {
                 self.closed = true;
@@ -254,7 +255,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
 
     fn poll_matrix(&mut self) -> Poll<(), io::Error> {
         loop {
-            if let Some(sync_response) = try_ready!(self.matrix_client.poll()) {
+            if let Some(sync_response) = futures::try_ready!(self.matrix_client.poll()) {
                 self.handle_sync_response(sync_response);
             } else {
                 self.closed = true;

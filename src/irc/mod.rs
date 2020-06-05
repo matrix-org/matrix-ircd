@@ -35,6 +35,8 @@ use futures::stream::Stream;
 
 use std::io;
 
+use slog::{trace, debug, info};
+
 pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: transport::IrcServerConnection<S>,
     pub user: String,
@@ -98,12 +100,12 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
 
                 let user_conn = IrcUserConnection {
                     conn: irc_conn,
-                    user: user,
-                    nick: nick,
+                    user,
+                    nick,
                     real_name: user_nick.real_name.expect("real_name"),
-                    password: password,
-                    server_name: server_name,
-                    user_prefix: user_prefix,
+                    password,
+                    server_name,
+                    user_prefix,
                     server_model: models::ServerModel::new(),
                 };
 
@@ -221,7 +223,7 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
 
     pub fn poll(&mut self) -> Poll<Option<IrcCommand>, io::Error> {
         loop {
-            match try_ready!(self.conn.poll()) {
+            match futures::try_ready!(self.conn.poll()) {
                 Some(cmd) => match cmd {
                     IrcCommand::Ping { data } => {
                         let line = format!(":{} PONG {}", &self.server_name, data);
@@ -230,7 +232,7 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     }
                     IrcCommand::Join { channel } => {
                         if !self.attempt_to_write_join_response(&channel) {
-                            return Ok(Async::Ready(Some(IrcCommand::Join{channel: channel})))
+                            return Ok(Async::Ready(Some(IrcCommand::Join{channel})))
                         }
                     }
                     IrcCommand::Who { matches } => {
