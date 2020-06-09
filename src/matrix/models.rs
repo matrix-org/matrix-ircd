@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::matrix::protocol::{Event, JoinedRoomSyncResponse};
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
-
 pub struct Room {
     room_id: String,
     state: BTreeMap<String, BTreeMap<String, Event>>,
-    members: BTreeMap<String, Member>
+    members: BTreeMap<String, Member>,
 }
 
 impl Room {
@@ -31,15 +29,21 @@ impl Room {
         let mut state_map = BTreeMap::new();
 
         for ev in &resp.state.events {
-            let state_key = ev.state_key.as_ref().expect("state should have state_key").to_string();
-            state_map.entry(ev.etype.clone())
+            let state_key = ev
+                .state_key
+                .as_ref()
+                .expect("state should have state_key")
+                .to_string();
+            state_map
+                .entry(ev.etype.clone())
                 .or_insert_with(BTreeMap::new)
                 .insert(state_key, ev.clone());
         }
 
         for ev in &resp.timeline.events {
             if let Some(ref state_key) = ev.state_key {
-                state_map.entry(ev.etype.clone())
+                state_map
+                    .entry(ev.etype.clone())
                     .or_insert_with(BTreeMap::new)
                     .insert(state_key.clone(), ev.clone());
             }
@@ -62,8 +66,13 @@ impl Room {
         for ev in &resp.state.events {
             contained_member_event |= ev.etype == "m.room_member";
 
-            let state_key = ev.state_key.as_ref().expect("state should have state_key").to_string();
-            self.state.entry(ev.etype.clone())
+            let state_key = ev
+                .state_key
+                .as_ref()
+                .expect("state should have state_key")
+                .to_string();
+            self.state
+                .entry(ev.etype.clone())
                 .or_insert_with(BTreeMap::new)
                 .insert(state_key, ev.clone());
         }
@@ -72,7 +81,8 @@ impl Room {
             if let Some(ref state_key) = ev.state_key {
                 contained_member_event |= ev.etype == "m.room_member";
 
-                self.state.entry(ev.etype.clone())
+                self.state
+                    .entry(ev.etype.clone())
                     .or_insert_with(BTreeMap::new)
                     .insert(state_key.clone(), ev.clone());
             }
@@ -86,7 +96,8 @@ impl Room {
     fn recalculate_members(&mut self) {
         let mut mods = BTreeSet::new();
         {
-            let mod_map = self.get_state("m.room.power_levels", "")
+            let mod_map = self
+                .get_state("m.room.power_levels", "")
                 .and_then(|content| content.get("users"))
                 .and_then(Value::as_object);
 
@@ -99,22 +110,36 @@ impl Room {
                     }
                 }
             }
-
         }
         {
-            let Room {ref state, ref mut members, ..} = *self;
+            let Room {
+                ref state,
+                ref mut members,
+                ..
+            } = *self;
 
             if let Some(member_state) = state.get("m.room.member") {
                 for (user_id, ev) in member_state {
-                    let membership = ev.content.get("membership").and_then(Value::as_str).unwrap_or("");
-                    let display_name = ev.content.get("displayname").and_then(Value::as_str).unwrap_or("");
+                    let membership = ev
+                        .content
+                        .get("membership")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let display_name = ev
+                        .content
+                        .get("displayname")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
 
                     if membership == "join" {
-                        members.insert(user_id.clone(), Member {
-                            user_id: user_id.clone(),
-                            display_name: display_name.into(),
-                            moderator: mods.contains(user_id),
-                        });
+                        members.insert(
+                            user_id.clone(),
+                            Member {
+                                user_id: user_id.clone(),
+                                display_name: display_name.into(),
+                                moderator: mods.contains(user_id),
+                            },
+                        );
                     }
                 }
             }
@@ -129,7 +154,12 @@ impl Room {
         self.get_state_content_key("m.room.topic", "", "topic")
     }
 
-    pub fn get_state_content_key(&self, etype: &str, state_key: &str, content_key: &str) -> Option<&str> {
+    pub fn get_state_content_key(
+        &self,
+        etype: &str,
+        state_key: &str,
+        content_key: &str,
+    ) -> Option<&str> {
         self.get_state(etype, state_key)
             .and_then(Value::as_object)
             .and_then(|content| content.get(content_key))
@@ -137,7 +167,8 @@ impl Room {
     }
 
     pub fn get_state(&self, etype: &str, state_key: &str) -> Option<&Value> {
-        self.state.get(etype)
+        self.state
+            .get(etype)
             .and_then(|topic_map| topic_map.get(state_key))
             .map(|topic_ev| &topic_ev.content)
     }
@@ -150,7 +181,6 @@ impl Room {
         &self.room_id
     }
 }
-
 
 pub struct Member {
     pub user_id: String,

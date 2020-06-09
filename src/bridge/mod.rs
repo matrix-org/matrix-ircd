@@ -12,33 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 //! The module responsible for mapping IRC and Matrix onto each other.
-
 
 use crate::ConnectionContext;
 
-use futures::{Async, Future, Poll};
 use futures::stream::Stream;
+use futures::{Async, Future, Poll};
 
 use crate::irc::{IrcCommand, IrcUserConnection};
 
-use crate::matrix::{LoginError, MatrixClient};
-use crate::matrix::protocol::{SyncResponse, JoinedRoomSyncResponse};
+use crate::matrix::protocol::{JoinedRoomSyncResponse, SyncResponse};
 use crate::matrix::Room as MatrixRoom;
+use crate::matrix::{LoginError, MatrixClient};
 
-use std::io;
 use std::collections::BTreeMap;
+use std::io;
 
 use serde_json::Value;
 
-use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
+use tokio_io::{AsyncRead, AsyncWrite};
 use url::Url;
 
-
-use tasked_futures::{TaskExecutorQueue, TaskExecutor, FutureTaskedExt, TaskedFuture};
-
+use tasked_futures::{FutureTaskedExt, TaskExecutor, TaskExecutorQueue, TaskedFuture};
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -61,16 +57,25 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// HS with the given user name and password.
     ///
     /// The bridge won't process any IRC commands until the initial sync has finished.
-    pub fn create(handle: Handle, base_url: Url, stream: IS, irc_server_name: String, ctx: ConnectionContext) -> Box<dyn Future<Item=Bridge<IS>, Error=io::Error>> {
+    pub fn create(
+        handle: Handle,
+        base_url: Url,
+        stream: IS,
+        irc_server_name: String,
+        ctx: ConnectionContext,
+    ) -> Box<dyn Future<Item = Bridge<IS>, Error = io::Error>> {
         let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
-        .and_then(move |mut user_connection| {
-            MatrixClient::login(
-                handle.clone(), base_url, user_connection.user.clone(), user_connection.password.clone()
-            ).then(move |res| {
-                match res {
+            .and_then(move |mut user_connection| {
+                MatrixClient::login(
+                    handle.clone(),
+                    base_url,
+                    user_connection.user.clone(),
+                    user_connection.password.clone(),
+                )
+                .then(move |res| match res {
                     Ok(matrix_client) => Ok(Bridge {
                         irc_conn: user_connection,
-                        matrix_client ,
+                        matrix_client,
                         ctx,
                         closed: false,
                         mappings: MappingStore::default(),
@@ -84,20 +89,24 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                         Err(io::Error::new(io::ErrorKind::Other, "Invalid password"))
                     }
                     Err(LoginError::Io(e)) => Err(e),
-                }
+                })
             })
-        })
-        .and_then(|mut bridge| {
-            {
-                let Bridge { ref mut mappings, ref mut irc_conn, ref matrix_client, .. } = bridge;
-                let own_nick = irc_conn.nick.clone();
-                let own_user_id = matrix_client.get_user_id().into();
-                mappings.insert_nick(irc_conn, own_nick, own_user_id);
-            }
-            bridge.spawn_fn(|bridge| bridge.poll_irc());
-            bridge.spawn_fn(|bridge| bridge.poll_matrix());
-            Ok(bridge)
-        });
+            .and_then(|mut bridge| {
+                {
+                    let Bridge {
+                        ref mut mappings,
+                        ref mut irc_conn,
+                        ref matrix_client,
+                        ..
+                    } = bridge;
+                    let own_nick = irc_conn.nick.clone();
+                    let own_user_id = matrix_client.get_user_id().into();
+                    mappings.insert_nick(irc_conn, own_nick, own_user_id);
+                }
+                bridge.spawn_fn(|bridge| bridge.poll_irc());
+                bridge.spawn_fn(|bridge| bridge.poll_matrix());
+                Ok(bridge)
+            });
 
         Box::new(f)
     }
@@ -110,8 +119,10 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
                     info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
                     self.handle.spawn(
-                        self.matrix_client.send_text_message(room_id, text)
-                        .map(|_| ()).map_err(move |_| task_warn!("Failed to send"))
+                        self.matrix_client
+                            .send_text_message(room_id, text)
+                            .map(|_| ())
+                            .map_err(move |_| task_warn!("Failed to send")),
                     );
                 } else {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
@@ -175,7 +186,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
 
     fn handle_room_sync(&mut self, room_id: &str, sync: &JoinedRoomSyncResponse) {
         let (channel, new) = if let Some(room) = self.matrix_client.get_room(room_id) {
-            self.mappings.create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)
+            self.mappings
+                .create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)
         } else {
             warn!(self.ctx.logger, "Got room matrix doesn't know about"; "room_id" => room_id);
             return;
@@ -183,7 +195,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
 
         if let Some(attempt_channel) = self.joining_map.remove(room_id) {
             if &attempt_channel != &channel {
-                self.irc_conn.write_redirect_join(&attempt_channel, &channel);
+                self.irc_conn
+                    .write_redirect_join(&attempt_channel, &channel);
             }
         }
 
@@ -191,41 +204,46 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
             if ev.etype == "m.room.message" {
                 let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
                     Some(x) => x,
-                    None    => {
+                    None => {
                         warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
                         continue;
                     }
                 };
                 let body = match ev.content.get("body").and_then(Value::as_str) {
                     Some(x) => x,
-                    None    => {
+                    None => {
                         warn!(self.ctx.logger, "Message has no body"; "room" => room_id, "message" => format!("{:?}", ev));
                         continue;
                     }
                 };
                 let msgtype = match ev.content.get("msgtype").and_then(Value::as_str) {
                     Some(x) => x,
-                    None    => {
+                    None => {
                         warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id, "message" => format!("{:?}", ev));
                         continue;
                     }
                 };
                 match msgtype {
-                    "m.text"  => self.irc_conn.send_message(&channel, sender_nick, body),
+                    "m.text" => self.irc_conn.send_message(&channel, sender_nick, body),
                     "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body),
                     "m.image" | "m.file" | "m.video" | "m.audio" => {
                         let url = ev.content.get("url").and_then(Value::as_str);
                         match url {
-                            Some(url) => self.irc_conn.send_message(&channel, sender_nick,
-                                                                    self.matrix_client.media_url(&url).as_str()),
-                            None      => warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
+                            Some(url) => self.irc_conn.send_message(
+                                &channel,
+                                sender_nick,
+                                self.matrix_client.media_url(&url).as_str(),
+                            ),
+                            None => {
+                                warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
                                                                                             "message" => format!("{:?}", ev))
+                            }
                         }
-                    },
+                    }
                     _ => {
                         warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
                         self.irc_conn.send_message(&channel, sender_nick, body);
-                    },
+                    }
                 }
             }
         }
@@ -260,7 +278,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
             } else {
                 self.closed = true;
                 self.stop();
-                return Ok(Async::Ready(()))
+                return Ok(Async::Ready(()));
             }
         }
     }
@@ -274,7 +292,6 @@ impl<IS: AsyncRead + AsyncWrite> TaskExecutor for Bridge<IS> {
     }
 }
 
-
 /// Handles mapping various IRC and Matrix ID's onto each other.
 #[derive(Debug, Clone, Default)]
 struct MappingStore {
@@ -286,8 +303,14 @@ struct MappingStore {
 }
 
 impl MappingStore {
-    pub fn insert_nick<S: AsyncRead + AsyncWrite + 'static>(&mut self, irc_server: &mut IrcUserConnection<S>, nick: String, user_id: String) {
-        self.matrix_uid_to_nick.insert(user_id.clone(), nick.clone());
+    pub fn insert_nick<S: AsyncRead + AsyncWrite + 'static>(
+        &mut self,
+        irc_server: &mut IrcUserConnection<S>,
+        nick: String,
+        user_id: String,
+    ) {
+        self.matrix_uid_to_nick
+            .insert(user_id.clone(), nick.clone());
         self.nick_matrix_uid.insert(nick.clone(), user_id.clone());
 
         irc_server.create_user(nick.clone(), user_id.into());
@@ -302,7 +325,9 @@ impl MappingStore {
     }
 
     pub fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
-        &mut self, irc_server: &mut IrcUserConnection<S>, room: &MatrixRoom
+        &mut self,
+        irc_server: &mut IrcUserConnection<S>,
+        room: &MatrixRoom,
     ) -> (String, bool) {
         let room_id = room.get_room_id();
 
@@ -315,10 +340,13 @@ impl MappingStore {
             if let Some(alias) = room.get_state_content_key("m.room.canonical_alias", "", "alias") {
                 alias.into()
             } else if let Some(name) = room.get_name() {
-                let stripped_name: String = name.chars().filter(|c| match *c {
-                    '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
-                    _ => true,
-                }).collect();
+                let stripped_name: String = name
+                    .chars()
+                    .filter(|c| match *c {
+                        '\x00'..='\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                        _ => true,
+                    })
+                    .collect();
 
                 if !stripped_name.is_empty() {
                     format!("#{}", stripped_name)
@@ -342,40 +370,64 @@ impl MappingStore {
             }
         }
 
-        self.room_id_to_channel.insert(room_id.into(), channel.clone());
-        self.channel_to_room_id.insert(channel.clone(), room_id.into());
+        self.room_id_to_channel
+            .insert(room_id.into(), channel.clone());
+        self.channel_to_room_id
+            .insert(channel.clone(), room_id.into());
 
-        let members: Vec<_> = room.get_members().iter().map(|(_, member)| {
-            (self.create_or_get_nick_from_matrix(irc_server, &member.user_id, &member.display_name), member.moderator)
-        }).collect();
+        let members: Vec<_> = room
+            .get_members()
+            .iter()
+            .map(|(_, member)| {
+                (
+                    self.create_or_get_nick_from_matrix(
+                        irc_server,
+                        &member.user_id,
+                        &member.display_name,
+                    ),
+                    member.moderator,
+                )
+            })
+            .collect();
 
         irc_server.add_channel(
             channel.clone(),
             room.get_topic().unwrap_or("").into(),
-            &members.iter().map(|&(ref nick, op)| (nick, op)).collect::<Vec<_>>()[..],  // FIXME: To get around lifetimes
+            &members
+                .iter()
+                .map(|&(ref nick, op)| (nick, op))
+                .collect::<Vec<_>>()[..], // FIXME: To get around lifetimes
         );
 
         (channel, true)
     }
 
     pub fn create_or_get_nick_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
-        &mut self, irc_server: &mut IrcUserConnection<S>, user_id: &str, display_name: &str
+        &mut self,
+        irc_server: &mut IrcUserConnection<S>,
+        user_id: &str,
+        display_name: &str,
     ) -> String {
         if let Some(nick) = self.matrix_uid_to_nick.get(user_id) {
             return nick.clone();
         }
 
-        let mut nick: String = display_name.chars().filter(|c| match *c {
-            '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
-            _ => true,
-        }).collect();
-
+        let mut nick: String = display_name
+            .chars()
+            .filter(|c| match *c {
+                '\x00'..='\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                _ => true,
+            })
+            .collect();
 
         if nick.len() < 3 {
-            nick = user_id.chars().filter(|c| match *c {
-                '\x00' ..= '\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
-                _ => true,
-            }).collect();
+            nick = user_id
+                .chars()
+                .filter(|c| match *c {
+                    '\x00'..='\x20' | '@' | '"' | '+' | '#' | '\x7F' => false,
+                    _ => true,
+                })
+                .collect();
         }
 
         if irc_server.nick_exists(&nick) {

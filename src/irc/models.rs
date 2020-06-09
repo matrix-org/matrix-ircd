@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, BTreeMap};
-
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct Channel {
     pub name: String,
     pub topic: String,
     pub modes: Vec<u8>,
-    pub users: BTreeMap<String, UserRoomEntry>
+    pub users: BTreeMap<String, UserRoomEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,12 +36,10 @@ pub struct User {
     channels: BTreeSet<String>,
 }
 
-
 pub struct ServerModel {
     channels: BTreeMap<String, Channel>,
     users: BTreeMap<String, User>,
 }
-
 
 impl ServerModel {
     pub fn new() -> ServerModel {
@@ -61,15 +58,23 @@ impl ServerModel {
     }
 
     pub fn create_user(&mut self, nick: String, user: String) {
-        self.users.insert(nick.clone(), User {
-            nick: nick.clone(),
-            user: user.into(),
-            mask: "/matrix/user".into(),
-            channels: BTreeSet::new(),
-        });
+        self.users.insert(
+            nick.clone(),
+            User {
+                nick: nick.clone(),
+                user: user.into(),
+                mask: "/matrix/user".into(),
+                channels: BTreeSet::new(),
+            },
+        );
     }
 
-    pub fn add_channel(&mut self, name: String, topic: String, members: &[(&String, bool)]) -> &Channel {
+    pub fn add_channel(
+        &mut self,
+        name: String,
+        topic: String,
+        members: &[(&String, bool)],
+    ) -> &Channel {
         if self.channels.contains_key(&name) {
             panic!("Trying to add channel that already exists");
         }
@@ -78,12 +83,18 @@ impl ServerModel {
             name: name.clone(),
             topic: topic,
             modes: Vec::from("+n"),
-            users: members.iter().map(|&(nick, is_operator)| {
-                (nick.to_string(), UserRoomEntry {
-                    operator: is_operator,
-                    voice: false,
+            users: members
+                .iter()
+                .map(|&(nick, is_operator)| {
+                    (
+                        nick.to_string(),
+                        UserRoomEntry {
+                            operator: is_operator,
+                            voice: false,
+                        },
+                    )
                 })
-            }).collect(),
+                .collect(),
         };
 
         self.channels.insert(name.clone(), channel);
@@ -103,9 +114,19 @@ impl ServerModel {
 
     pub fn get_members(&self, channel: &str) -> Option<Vec<(User, UserRoomEntry)>> {
         self.channels.get(channel).map(|entry| {
-            entry.users.iter().map(|(nick, user_entry)| {
-                (self.users.get(nick).expect("expected user to exist").clone(), user_entry.clone())
-            }).collect()
+            entry
+                .users
+                .iter()
+                .map(|(nick, user_entry)| {
+                    (
+                        self.users
+                            .get(nick)
+                            .expect("expected user to exist")
+                            .clone(),
+                        user_entry.clone(),
+                    )
+                })
+                .collect()
         })
     }
 }

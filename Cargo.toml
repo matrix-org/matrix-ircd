@@ -15,8 +15,7 @@ netbuf = "0.4.1"
 # TODO: upgrate to 2.1.3
 pest = "0.4.0"
 quick-error = "1.2.3"
-# TODO: upgrade to 0.7.3
-rand = "0.3.14"
+rand = "0.7.3"
 regex = "1.3.9"
 serde = {version="1.0.111", features=["derive"]}
 serde_json = "1.0.53"
@@ -29,6 +28,8 @@ tokio-io = "0.1.3"
 tokio-proto = "0.1.0"
 tokio-tls = "0.2.0"
 url = "1.7.2"
+# currently added for sanity testing http.rs
+reqwest = {version = "0.10.6", features=["blocking"]}
 
 [dependencies.openssl]
 version = "0.10.0"
@@ -47,3 +48,7 @@ trace_logging = [
     "slog/max_level_trace",
     "slog/release_max_level_warn",
 ]
+
+[dev-dependencies]
+# HTTP mocking
+mockito = "0.25.2"

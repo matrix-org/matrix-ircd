@@ -12,30 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 //! The main module responsible for keeping track of IRC Matrix side of the world.
 //!
 //! It knows nothing about Matrix.
 
-
-pub mod transport;
-mod protocol;
 mod models;
+mod protocol;
+pub mod transport;
 
 pub use self::protocol::{Command, IrcCommand, IrcLine, Numeric};
 
-
-use crate::ConnectionContext;
 use crate::stream_fold::StreamFold;
+use crate::ConnectionContext;
 
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use futures::{Async, Future, Poll};
 use futures::stream::Stream;
+use futures::{Async, Future, Poll};
 
 use std::io;
 
-use slog::{trace, debug, info};
+use slog::{debug, info, trace};
 
 pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: transport::IrcServerConnection<S>,
@@ -48,7 +45,6 @@ pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     server_model: models::ServerModel,
 }
 
-
 #[derive(Debug, Clone, Default)]
 struct UserNick {
     nick: Option<String>,
@@ -59,9 +55,14 @@ struct UserNick {
 
 impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
-    pub fn await_login(server_name: String, stream: S, ctx: ConnectionContext) -> Box<dyn Future<Item=IrcUserConnection<S>, Error=io::Error>> {
+    pub fn await_login(
+        server_name: String,
+        stream: S,
+        ctx: ConnectionContext,
+    ) -> Box<dyn Future<Item = IrcUserConnection<S>, Error = io::Error>> {
         trace!(ctx.logger, "Await login");
-        let irc_conn = transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
+        let irc_conn =
+            transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
 
         let ctx_clone = ctx.clone();
 
@@ -73,16 +74,20 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     user_nick.user = Some(user);
                     user_nick.real_name = Some(real_name);
                 }
-                IrcCommand::Pass { password } => {
-                    user_nick.password = Some(password)
-                }
+                IrcCommand::Pass { password } => user_nick.password = Some(password),
                 c => {
                     debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
                 }
             }
 
-            (user_nick.nick.is_some() && user_nick.user.is_some() && user_nick.real_name.is_some(), user_nick)
-        }).and_then(move |opt| {
+            (
+                user_nick.nick.is_some()
+                    && user_nick.user.is_some()
+                    && user_nick.real_name.is_some(),
+                user_nick,
+            )
+        })
+        .and_then(move |opt| {
             if let Some((user_nick, mut irc_conn)) = opt {
                 info!(ctx_clone.logger, "Got nick and user");
 
@@ -92,7 +97,10 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     p
                 } else {
                     irc_conn.write_password_required(&nick);
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "IRC user did not supply password"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "IRC user did not supply password",
+                    ));
                 };
 
                 let user = user_nick.user.expect("user");
@@ -118,7 +126,10 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                 Ok(user_conn)
             } else {
                 info!(ctx_clone.logger, "IRC conn died during login");
-                Err(io::Error::new(io::ErrorKind::UnexpectedEof, "IRC stream ended during login"))
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "IRC stream ended during login",
+                ))
             }
         });
 
@@ -143,14 +154,28 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     }
 
     fn attempt_to_write_join_response(&mut self, name: &str) -> bool {
-        let IrcUserConnection { ref mut server_model, ref mut conn, .. } = *self;
+        let IrcUserConnection {
+            ref mut server_model,
+            ref mut conn,
+            ..
+        } = *self;
 
-        if let (Some(channel), Some(members)) = (server_model.get_channel(name), server_model.get_members(name)) {
-            let names: Vec<_> = members.iter().map(|&(ref user, ref entry)| (&user.nick, entry.operator)).collect();
+        if let (Some(channel), Some(members)) = (
+            server_model.get_channel(name),
+            server_model.get_members(name),
+        ) {
+            let names: Vec<_> = members
+                .iter()
+                .map(|&(ref user, ref entry)| (&user.nick, entry.operator))
+                .collect();
             conn.write_join(&self.user_prefix, &channel.name);
             conn.write_topic(&self.server_name, &channel.name, &channel.topic);
             conn.write_names(&self.nick, name, &names[..]);
-            conn.write_numeric(Numeric::RplChannelmodeis, &self.nick, &format!("{} +n", &channel.name));
+            conn.write_numeric(
+                Numeric::RplChannelmodeis,
+                &self.nick,
+                &format!("{} +n", &channel.name),
+            );
             true
         } else {
             false
@@ -159,13 +184,17 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
 
     pub fn send_message(&mut self, channel: &str, sender: &str, body: &str) {
         for line in body.split('\n') {
-            self.conn.write_line(&format!(":{} PRIVMSG {} :{}", sender, channel, line));
+            self.conn
+                .write_line(&format!(":{} PRIVMSG {} :{}", sender, channel, line));
         }
     }
 
     pub fn send_action(&mut self, channel: &str, sender: &str, body: &str) {
         for line in body.split('\n') {
-            self.conn.write_line(&format!(":{} PRIVMSG {} :\u{0001}ACTION {}\u{0001}", sender, channel, line));
+            self.conn.write_line(&format!(
+                ":{} PRIVMSG {} :\u{0001}ACTION {}\u{0001}",
+                sender, channel, line
+            ));
         }
     }
 
@@ -174,16 +203,21 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     }
 
     pub fn write_redirect_join(&mut self, old_channel: &str, new_channel: &str) {
-        self.conn.write_numeric(Numeric::RplForwardedChannel, &self.nick, &format!(
-            "{} {} :Forwarding to another channel", old_channel, new_channel,
-        ));
+        self.conn.write_numeric(
+            Numeric::RplForwardedChannel,
+            &self.nick,
+            &format!(
+                "{} {} :Forwarding to another channel",
+                old_channel, new_channel,
+            ),
+        );
     }
 
     pub fn welcome(&mut self) {
         self.conn.welcome(&self.nick);
     }
 
-    pub fn send_ping(&mut self, data:&str) {
+    pub fn send_ping(&mut self, data: &str) {
         let line = format!("PING {}", data);
         self.write_line(&line);
     }
@@ -193,7 +227,11 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     }
 
     fn handle_who_channel_cmd(&mut self, channel: String) {
-        let IrcUserConnection { ref mut server_model, ref mut conn, .. } = *self;
+        let IrcUserConnection {
+            ref mut server_model,
+            ref mut conn,
+            ..
+        } = *self;
 
         if let Some(members) = server_model.get_members(&channel) {
             for (user, _) in members {
@@ -202,23 +240,26 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     &self.nick,
                     &format!(
                         "{} {} {} {} {} H :0 {}",
-                        &channel,
-                        &user.nick,
-                        &user.mask,
-                        &self.server_name,
-                        &user.user,
-                        &user.user,
-                    )
+                        &channel, &user.nick, &user.mask, &self.server_name, &user.user, &user.user,
+                    ),
                 );
             }
-            conn.write_numeric(Numeric::RplEndofwho, &self.nick, &format!("{} :End of /WHO", &channel));
+            conn.write_numeric(
+                Numeric::RplEndofwho,
+                &self.nick,
+                &format!("{} :End of /WHO", &channel),
+            );
         } else {
             // TODO: No such room
         }
     }
 
     fn handle_mode_channel_cmd(&mut self, channel: String) {
-        self.conn.write_numeric(Numeric::RplChannelmodeis, &self.nick, &format!("{} +n", &channel));
+        self.conn.write_numeric(
+            Numeric::RplChannelmodeis,
+            &self.nick,
+            &format!("{} +n", &channel),
+        );
     }
 
     pub fn poll(&mut self) -> Poll<Option<IrcCommand>, io::Error> {
@@ -228,11 +269,11 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                     IrcCommand::Ping { data } => {
                         let line = format!(":{} PONG {}", &self.server_name, data);
                         self.write_line(&line);
-                        continue
+                        continue;
                     }
                     IrcCommand::Join { channel } => {
                         if !self.attempt_to_write_join_response(&channel) {
-                            return Ok(Async::Ready(Some(IrcCommand::Join{channel})))
+                            return Ok(Async::Ready(Some(IrcCommand::Join { channel })));
                         }
                     }
                     IrcCommand::Who { matches } => {
@@ -250,9 +291,9 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
                         }
                     }
                     IrcCommand::Pong { .. } => {}
-                    c => return Ok(Async::Ready(Some(c)))
+                    c => return Ok(Async::Ready(Some(c))),
                 },
-                None => return Ok(Async::Ready(None))
+                None => return Ok(Async::Ready(None)),
             }
         }
     }
