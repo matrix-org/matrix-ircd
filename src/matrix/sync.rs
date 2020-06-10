@@ -158,8 +158,6 @@ mod tests {
             Ok(())
         });
 
-        handle.spawn_send(runner);
-
         // mocking http requests stuff
         let mut mockito_url = base_url.clone().join("/_matrix/client/r0/sync").unwrap();
         // Url that is requested from MatrixSyncClient::poll_sync().
@@ -183,6 +181,8 @@ mod tests {
         )
         .with_status(201)
         .create();
+
+        handle.spawn_send(runner);
 
         // give the executor some time to execute the http request on a thread pool
         std::thread::sleep(std::time::Duration::from_millis(200));
