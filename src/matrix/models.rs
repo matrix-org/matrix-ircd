@@ -50,7 +50,7 @@ impl Room {
         }
 
         let mut room = Room {
-            room_id: room_id,
+            room_id,
             state: state_map,
             members: BTreeMap::new(),
         };
