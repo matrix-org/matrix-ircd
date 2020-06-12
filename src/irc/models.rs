@@ -81,7 +81,7 @@ impl ServerModel {
 
         let channel = Channel {
             name: name.clone(),
-            topic: topic,
+            topic,
             modes: Vec::from("+n"),
             users: members
                 .iter()

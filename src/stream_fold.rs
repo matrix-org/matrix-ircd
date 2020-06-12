@@ -30,11 +30,8 @@ impl<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)>
 {
     pub fn new(stream: S, value: V, func: F) -> StreamFold<I, E, S, V, F> {
         StreamFold {
-            func: func,
-            state: StreamFoldState::Full {
-                stream: stream,
-                value: value,
-            },
+            func,
+            state: StreamFoldState::Full { stream, value },
         }
     }
 }
