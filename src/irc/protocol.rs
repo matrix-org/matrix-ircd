@@ -101,7 +101,7 @@ impl IrcCommand {
                 let mut it = irc_line.args.into_iter();
                 if let Some(target) = it.next() {
                     Some(IrcCommand::Mode {
-                        target: target,
+                        target,
                         mask: it.next(),
                     })
                 } else {
@@ -121,10 +121,7 @@ impl IrcCommand {
             Command::PrivMsg => {
                 let mut it = irc_line.args.into_iter();
                 if let (Some(channel), Some(text)) = (it.nth(0), it.nth(0)) {
-                    Some(IrcCommand::PrivMsg {
-                        channel: channel,
-                        text: text,
-                    })
+                    Some(IrcCommand::PrivMsg { channel, text })
                 } else {
                     None
                 }
@@ -132,10 +129,7 @@ impl IrcCommand {
             Command::Topic => {
                 let mut it = irc_line.args.into_iter();
                 if let (Some(channel), Some(topic)) = (it.nth(0), it.nth(0)) {
-                    Some(IrcCommand::Topic {
-                        channel: channel,
-                        topic: topic,
-                    })
+                    Some(IrcCommand::Topic { channel, topic })
                 } else {
                     None
                 }
@@ -359,9 +353,9 @@ pub fn parse_irc_line(line: &str) -> Option<IrcLine> {
     } = builder;
 
     Some(IrcLine {
-        prefix: prefix,
+        prefix,
         command: command.expect("expected command").into(),
-        args: args,
+        args,
     })
 }
 
