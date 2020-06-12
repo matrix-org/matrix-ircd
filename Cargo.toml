@@ -29,7 +29,7 @@ tokio-proto = "0.1.0"
 tokio-tls = "0.2.0"
 url = "1.7.2"
 # currently added for sanity testing http.rs
-reqwest = {version = "0.10.6", features=["blocking"]}
+hyper = "0.13.6"
 
 [dependencies.openssl]
 version = "0.10.0"
