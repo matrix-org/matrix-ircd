@@ -21,8 +21,6 @@ use std::io;
 
 use super::protocol::SyncResponse;
 
-use tokio_core::reactor::Handle;
-
 use std::pin::Pin;
 use url::Url;
 
@@ -50,7 +48,7 @@ enum RequestStatus {
 }
 
 impl MatrixSyncClient {
-    pub fn new(handle: Handle, base_url: &Url, access_token: String) -> MatrixSyncClient {
+    pub fn new(base_url: &Url, access_token: String) -> MatrixSyncClient {
         let host = base_url.host_str().expect("expected host in base_url");
         let port = base_url.port_or_known_default().unwrap();
 
@@ -156,7 +154,17 @@ impl MatrixSyncClient {
     }
 }
 
-impl Stream for MatrixSyncClient {
+impl std::fmt::Debug for MatrixSyncClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MatrixSyncClient")
+            .field("url", &self.url)
+            .field("access_token", &self.access_token)
+            .field("next_token", &self.next_token)
+            .finish()
+    }
+}
+
+impl futures3::prelude::Stream for MatrixSyncClient {
     type Item = Result<SyncResponse, io::Error>;
 
     fn poll_next(
