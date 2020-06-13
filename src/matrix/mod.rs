@@ -16,24 +16,18 @@
 //!
 //! It knows nothing about IRC.
 
-//use futures::stream::Stream;
-//use futures::{Async, Future, Poll};
-
-use futures3::prelude::{Future, Stream};
-use futures3::stream::StreamExt;
+use futures3::prelude::Stream;
 use futures3::task::Poll;
 
 use std::collections::BTreeMap;
 use std::io;
 use std::pin::Pin;
 use std::boxed::Box;
-
+use std::task::Context;
 
 use url::percent_encoding::{percent_encode, PATH_SEGMENT_ENCODE_SET};
 use url::Url;
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use serde_json;
 
 use rand::{thread_rng, Rng};
@@ -49,7 +43,6 @@ mod sync;
 
 pub use self::models::{Member, Room};
 
-use std::task::Context;
 
 /// A single Matrix session.
 ///
@@ -91,7 +84,7 @@ impl MatrixClient {
         base_url: Url,
         user: String,
         password: String,
-    ) ->  Result<MatrixClient, LoginError> {
+    ) ->  Result<MatrixClient, Error> {
         let host = base_url
             .host_str()
             .expect("expected host in base_url")
@@ -133,7 +126,7 @@ impl MatrixClient {
         &mut self,
         room_id: &str,
         body: String,
-    ) -> Result<protocol::RoomSendResponse, io::Error> {
+    ) -> Result<protocol::RoomSendResponse, Error> {
         let msg_id = thread_rng().gen::<u16>();
         let mut url = self
             .url
@@ -156,18 +149,17 @@ impl MatrixClient {
             .expect("request could not be built");
         
         // TODO: improve this error handling
-        let response = self.http_client.send_request(request).await.unwrap();
-        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let response = self.http_client.send_request(request).await?;
+        let bytes = hyper::body::to_bytes(response.into_body()).await?;
 
-        let json_response = serde_json::from_slice(&bytes).unwrap();
+        let json_response = serde_json::from_slice(&bytes)?;
         Ok(json_response)
-
     }
 
     pub async fn join_room(
         &mut self,
         room_id: &str,
-    ) -> Result<protocol::RoomJoinResponse, io::Error> {
+    ) -> Result<protocol::RoomJoinResponse, Error> {
         let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
         let mut url = self
             .url
@@ -178,7 +170,7 @@ impl MatrixClient {
             .clear()
             .append_pair("access_token", &self.access_token);
 
-        let json_bytes = serde_json::to_vec(&protocol::RoomJoinInput {}).unwrap();
+        let json_bytes = serde_json::to_vec(&protocol::RoomJoinInput {})?;
 
         let request = hyper::Request::builder()
             .method("POST")
@@ -186,14 +178,10 @@ impl MatrixClient {
             .body(json_bytes.into())
             .expect("request could not be built");
 
-
-        // TODO: improve this error handling
-        let response = self.http_client.send_request(request).await.unwrap();
-        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
-        let json_response = serde_json::from_slice(&bytes).unwrap();
+        let response = self.http_client.send_request(request).await?;
+        let bytes = hyper::body::to_bytes(response.into_body()).await?;
+        let json_response = serde_json::from_slice(&bytes)?;
         Ok(json_response)
-
-        //Box::new(f)
     }
 
     pub fn get_room(&self, room_id: &str) -> Option<&Room> {
@@ -216,7 +204,7 @@ impl MatrixClient {
         }
     }
 
-    fn poll_sync(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<protocol::SyncResponse, io::Error>>> {
+    fn poll_sync(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<protocol::SyncResponse, Error>>> {
         let resp = match self.sync_client.as_mut().poll_next(cx)? {
             Poll::Ready(x) => x,
             Poll::Pending => return Poll::Pending,
@@ -278,7 +266,7 @@ impl JsonPostError {
 
 quick_error! {
     #[derive(Debug)]
-    pub enum LoginError {
+    pub enum Error {
         Io(err: io::Error) {
             from()
             description("io error")
@@ -304,10 +292,77 @@ quick_error! {
 
 
 impl Stream for MatrixClient {
-    type Item = Result<protocol::SyncResponse, io::Error>;
+    type Item = Result<protocol::SyncResponse, Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         task_trace!("Polled matrix client");
         self.poll_sync(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MatrixClient;
+    use mockito::{mock, Matcher, Matcher::UrlEncoded};
+    #[tokio::test]
+    async fn matrix_login() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let username = "sample_username".to_string();
+        let password = "sample_password".to_string();
+
+        let mock_req = mock("POST", "/_matrix/client/r0/login?")
+            .with_header("content-type", "application/json")
+            .with_status(200)
+            .create();
+
+        // run the future to completion. The future will error since invalid json is
+        // returned, but as long as the call is correct the error is outside the scope of this
+        // test. It is explicitly handled here in case the mock assert panics.
+        if let Err(e) = MatrixClient::login(
+            base_url,
+            username,
+            password,
+        ).await {
+            println! {"MatrixSyncClient returned an error: {:?}", e}
+        }
+
+        // give the executor some time to execute the http request on a thread pool
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        mock_req.assert();
+    }
+
+    #[tokio::test]
+    async fn send_text_message() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let user_id = "sample_user_id".to_string();
+        let token = "sample_token".to_string();
+        let room_id = "room_id";
+
+        let mock_req = mock(
+            "PUT",
+            Matcher::Regex(
+                r"^/_matrix/client/r0/rooms/(.+)/send/m.room.message/mircd-(\d+)$".to_string(),
+            ),
+        )
+        .match_query(UrlEncoded("access_token".to_string(), token.clone()))
+        .with_status(200)
+        .create();
+
+        let httpclient = crate::http::ClientWrapper::new();
+
+        let mut client = MatrixClient::new(httpclient, &base_url, user_id, token);
+
+        // run the future to completion. The future will error since invalid json is
+        // returned, but as long as the call is correct the error is outside the scope of this
+        // test. It is explicitly handled here in case the mock assert panics.
+        if let Err(e) = client.send_text_message(room_id, "sample_body".to_string()).await {
+            println! {"MatrixSyncClient returned an error: {:?}", e}
+        }
+
+        // give the executor some time to execute the http request on a thread pool
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        mock_req.assert();
     }
 }
