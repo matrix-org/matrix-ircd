@@ -204,7 +204,7 @@ impl MatrixClient {
         }
     }
 
-    fn poll_sync(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<protocol::SyncResponse, Error>>> {
+    fn poll_sync(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<protocol::SyncResponse, Error>>> {
         let resp = match self.sync_client.as_mut().poll_next(cx)? {
             Poll::Ready(x) => x,
             Poll::Pending => return Poll::Pending,

@@ -25,10 +25,11 @@ pub use self::protocol::{Command, IrcCommand, IrcLine, Numeric};
 use crate::stream_fold::StreamFold;
 use crate::ConnectionContext;
 
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite};
 
-use futures::stream::Stream;
-use futures::{Async, Future, Poll};
+use futures3::future::{Future, FutureExt};
+use futures3::stream::{Stream, StreamExt};
+use futures3::task::Poll;
 
 use std::io;
 
@@ -55,11 +56,11 @@ struct UserNick {
 
 impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
-    pub fn await_login(
+    pub async fn await_login(
         server_name: String,
         stream: S,
         ctx: ConnectionContext,
-    ) -> Box<dyn Future<Item = IrcUserConnection<S>, Error = io::Error>> {
+    ) -> Result<IrcUserConnection<S>, io::Error> {
         trace!(ctx.logger, "Await login");
         let irc_conn =
             transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());

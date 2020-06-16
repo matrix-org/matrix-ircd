@@ -16,17 +16,25 @@
 
 use crate::ConnectionContext;
 
-use futures::stream::Stream;
-use futures::{Async, Future, Poll};
+//use futures::stream::Stream;
+//use futures::{Async, Future, Poll};
+use futures3::compat::Compat;
+use futures3::prelude::{Future, Stream};
+use futures3::task::Poll;
 
 use crate::irc::{IrcCommand, IrcUserConnection};
 
 use crate::matrix::protocol::{JoinedRoomSyncResponse, SyncResponse};
 use crate::matrix::Room as MatrixRoom;
-use crate::matrix::{LoginError, MatrixClient};
+use crate::matrix::{self, MatrixClient};
 
+use quick_error::quick_error;
+
+use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::io;
+use std::pin::Pin;
+use std::task::Context;
 
 use serde_json::Value;
 
@@ -41,8 +49,8 @@ use tasked_futures::{FutureTaskedExt, TaskExecutor, TaskExecutorQueue, TaskedFut
 /// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
 /// on unrecoverable error).
 pub struct Bridge<IS: AsyncRead + AsyncWrite + 'static> {
-    irc_conn: IrcUserConnection<IS>,
-    matrix_client: MatrixClient,
+    irc_conn: Pin<Box<IrcUserConnection<IS>>>,
+    matrix_client: Pin<Box<MatrixClient>>,
     ctx: ConnectionContext,
     closed: bool,
     mappings: MappingStore,
@@ -57,58 +65,64 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// HS with the given user name and password.
     ///
     /// The bridge won't process any IRC commands until the initial sync has finished.
-    pub fn create(
+    pub async fn create(
         handle: Handle,
         base_url: Url,
         stream: IS,
         irc_server_name: String,
         ctx: ConnectionContext,
-    ) -> Box<dyn Future<Item = Bridge<IS>, Error = io::Error>> {
-        let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
-            .and_then(move |mut user_connection| {
-                MatrixClient::login(
-                    handle.clone(),
-                    base_url,
-                    user_connection.user.clone(),
-                    user_connection.password.clone(),
-                )
-                .then(move |res| match res {
-                    Ok(matrix_client) => Ok(Bridge {
-                        irc_conn: user_connection,
-                        matrix_client,
-                        ctx,
-                        closed: false,
-                        mappings: MappingStore::default(),
-                        handle,
-                        is_first_sync: true,
-                        executor_queue: TaskExecutorQueue::default(),
-                        joining_map: BTreeMap::new(),
-                    }),
-                    Err(LoginError::InvalidPassword) => {
-                        user_connection.write_invalid_password();
-                        Err(io::Error::new(io::ErrorKind::Other, "Invalid password"))
-                    }
-                    Err(LoginError::Io(e)) => Err(e),
-                })
-            })
-            .and_then(|mut bridge| {
-                {
-                    let Bridge {
-                        ref mut mappings,
-                        ref mut irc_conn,
-                        ref matrix_client,
-                        ..
-                    } = bridge;
-                    let own_nick = irc_conn.nick.clone();
-                    let own_user_id = matrix_client.get_user_id().into();
-                    mappings.insert_nick(irc_conn, own_nick, own_user_id);
-                }
-                bridge.spawn_fn(|bridge| bridge.poll_irc());
-                bridge.spawn_fn(|bridge| bridge.poll_matrix());
-                Ok(bridge)
-            });
+    ) -> Result<Bridge<IS>, Error> {
+        //let f = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone())
+        //    .and_then(move |mut user_connection| {
+        //        let fut = Compat::new(Box::pin(MatrixClient::login(
+        //            base_url,
+        //            user_connection.user.clone(),
+        //            user_connection.password.clone(),
+        //        )));
+        //        fut.then(move |res| match res {
+        //            Ok(client) => Ok(Bridge {
+        //                irc_conn: user_connection,
+        //                matrix_client: Box::pin(client),
+        //                ctx,
+        //                closed: false,
+        //                mappings: MappingStore::default(),
+        //                handle,
+        //                is_first_sync: true,
+        //                executor_queue: TaskExecutorQueue::default(),
+        //                joining_map: BTreeMap::new(),
+        //            }),
+        //            Err(matrix::Error::InvalidPassword) => {
+        //                user_connection.write_invalid_password();
+        //                Err(Error::Io(io::Error::new(
+        //                    io::ErrorKind::Other,
+        //                    "Invalid password",
+        //                )))
+        //            }
+        //            Err(matrix::Error::Io(e)) => Err(Error::from(e)),
+        //            Err(other) => Err(Error::from(other)),
+        //        })
+        //    })
+        //    .and_then(|mut bridge| {
+        //        {
+        //            let Bridge {
+        //                ref mut mappings,
+        //                ref mut irc_conn,
+        //                ref matrix_client,
+        //                ..
+        //            } = bridge;
+        //            let own_nick = irc_conn.nick.clone();
+        //            let own_user_id = matrix_client.get_user_id().into();
+        //            mappings.insert_nick(irc_conn, own_nick, own_user_id);
+        //        }
+        //        bridge.spawn_fn(|bridge| bridge.poll_irc());
+        //        bridge.spawn_fn(|bridge| bridge.poll_matrix());
+        //        Ok(bridge)
+        //    });
 
-        Box::new(f)
+        //Box::new(f)
+
+        // TODO: fix this abomination
+        Err(Error::Io(io::Error::new(io::ErrorKind::Other, "this fixes compiler errors")))
     }
 
     fn handle_irc_cmd(&mut self, line: IrcCommand) {
@@ -253,32 +267,36 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
     }
 
-    fn poll_irc(&mut self) -> Poll<(), io::Error> {
+    fn poll_irc(&mut self, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
         if self.is_first_sync {
-            return Ok(Async::NotReady);
+            return Poll::Pending;
         }
 
         loop {
-            if let Some(line) = futures::try_ready!(self.irc_conn.poll()) {
+            if let Some(line) = self.irc_conn.as_mut().poll_next(cx) {
                 self.handle_irc_cmd(line);
             } else {
                 self.closed = true;
                 self.stop();
-                return Ok(Async::Ready(()));
+                return Poll::Ready(Ok(()));
             }
         }
     }
 
-    fn poll_matrix(&mut self) -> Poll<(), io::Error> {
+    fn poll_matrix(&mut self, cx: &mut Context) -> Poll<Result<(), Error>> {
         loop {
-            if let Some(sync_response) = futures::try_ready!(self.matrix_client.poll()) {
-                self.handle_sync_response(sync_response);
+            let response = match self.matrix_client.as_mut().poll_next(cx)? {
+                Poll::Ready(r) => r,
+                Poll::Pending => return Poll::Pending
+            };
+            if let Some(sync_response) = response {
+               self.handle_sync_response(sync_response);
             } else {
                 self.closed = true;
                 self.stop();
-                return Ok(Async::Ready(()));
+                return Poll::Ready(Ok(()));
             }
         }
     }
@@ -289,6 +307,37 @@ impl<IS: AsyncRead + AsyncWrite> TaskExecutor for Bridge<IS> {
 
     fn task_executor_mut(&mut self) -> &mut TaskExecutorQueue<Self, io::Error> {
         &mut self.executor_queue
+    }
+}
+
+quick_error! {
+    #[derive(Debug)]
+    pub enum Error {
+        Io(err: io::Error) {
+            from()
+            description("io error")
+            display("I/O error: {}", err)
+            cause(err)
+        }
+        InvalidPassword {
+            description("password was invalid")
+            display("Password is invalid")
+        }
+        HyperErr(err: hyper::Error) {
+            from()
+            description("hyper error when making http request")
+            display("Hyper error: {}", err)
+        }
+        SerdeErr(err: serde_json::Error) {
+            from()
+            description("could not serialize / deserialize struct")
+            display("Could not serialize request struct or deserialize response")
+        }
+        MatrixError(err: matrix::Error) {
+            from()
+            description("an error occured when polling the matrix client")
+            display("An error occured when polling the matrix client: {} ", err)
+        }
     }
 }
 
