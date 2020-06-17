@@ -84,7 +84,6 @@ pub struct ConnectionContext {
     peer_addr: SocketAddr,
 }
 
-
 fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, String> {
     File::open(&cert_file)
     .and_then(|mut file| {
