@@ -12,59 +12,91 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(feature = "clippy", allow(block_in_if_condition_stmt))]  // impl_rdp! uses this
+#![cfg_attr(feature = "clippy", allow(block_in_if_condition_stmt))] // impl_rdp! uses this
 
-use slog::{Record, Value, Serializer};
 use slog::Error as SlogSerError;
+use slog::{Record, Serializer, Value};
+
+use pest::{grammar, impl_rdp};
 
 use std::convert::From;
 use std::str;
 use std::str::FromStr;
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IrcCommand {
-    Nick { nick: String },
-    User { user: String, real_name: String },
-    Join { channel: String },
-    Part { channel: String },
+    Nick {
+        nick: String,
+    },
+    User {
+        user: String,
+        real_name: String,
+    },
+    Join {
+        channel: String,
+    },
+    Part {
+        channel: String,
+    },
     Quit,
-    Ping { data: String },
-    Mode { target: String, mask: Option<String> },
-    Pong { data: String },
-    Pass { password: String },
-    PrivMsg { channel: String, text: String },
-    Topic { channel: String, topic: String },
-    Who { matches: String },
+    Ping {
+        data: String,
+    },
+    Mode {
+        target: String,
+        mask: Option<String>,
+    },
+    Pong {
+        data: String,
+    },
+    Pass {
+        password: String,
+    },
+    PrivMsg {
+        channel: String,
+        text: String,
+    },
+    Topic {
+        channel: String,
+        topic: String,
+    },
+    Who {
+        matches: String,
+    },
 }
 
 impl IrcCommand {
     pub fn from_irc_line(irc_line: IrcLine) -> Option<IrcCommand> {
         match irc_line.command {
-            Command::Nick => {
-                irc_line.args.into_iter().next().map(|nick| IrcCommand::Nick { nick: nick })
-            }
+            Command::Nick => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|nick| IrcCommand::Nick { nick }),
             Command::User => {
                 let mut it = irc_line.args.into_iter();
                 if let (Some(user), Some(real_name)) = (it.nth(0), it.nth(2)) {
-                    Some(IrcCommand::User {
-                        user: user,
-                        real_name: real_name,
-                    })
+                    Some(IrcCommand::User { user, real_name })
                 } else {
                     None
                 }
             }
-            Command::Join => {
-                irc_line.args.into_iter().next().map(|arg| IrcCommand::Join { channel: arg })
-            }
-            Command::Part => {
-                irc_line.args.into_iter().next().map(|arg| IrcCommand::Part { channel: arg })
-            }
+            Command::Join => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|arg| IrcCommand::Join { channel: arg }),
+            Command::Part => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|arg| IrcCommand::Part { channel: arg }),
             Command::Quit => Some(IrcCommand::Quit),
-            Command::Ping => {
-                irc_line.args.into_iter().next().map(|arg| IrcCommand::Ping { data: arg })
-            }
+            Command::Ping => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|arg| IrcCommand::Ping { data: arg }),
             Command::Mode => {
                 let mut it = irc_line.args.into_iter();
                 if let Some(target) = it.next() {
@@ -76,12 +108,16 @@ impl IrcCommand {
                     None
                 }
             }
-            Command::Pong => {
-                irc_line.args.into_iter().next().map(|arg| IrcCommand::Pong { data: arg })
-            }
-            Command::Pass => {
-                irc_line.args.into_iter().next().map(|arg| IrcCommand::Pass { password: arg })
-            }
+            Command::Pong => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|arg| IrcCommand::Pong { data: arg }),
+            Command::Pass => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|arg| IrcCommand::Pass { password: arg }),
             Command::PrivMsg => {
                 let mut it = irc_line.args.into_iter();
                 if let (Some(channel), Some(text)) = (it.nth(0), it.nth(0)) {
@@ -104,11 +140,12 @@ impl IrcCommand {
                     None
                 }
             }
-            Command::Who => {
-                irc_line.args.into_iter().next().map(|arg| IrcCommand::Who { matches: arg })
-            }
-            Command::Numeric { .. } |
-            Command::Unknown => None,
+            Command::Who => irc_line
+                .args
+                .into_iter()
+                .next()
+                .map(|arg| IrcCommand::Who { matches: arg }),
+            Command::Numeric { .. } | Command::Unknown => None,
         }
     }
 
@@ -133,10 +170,11 @@ impl IrcCommand {
 impl FromStr for IrcCommand {
     type Err = ();
     fn from_str(line: &str) -> Result<IrcCommand, ()> {
-        parse_irc_line(line).and_then(IrcCommand::from_irc_line).ok_or(())
+        parse_irc_line(line)
+            .and_then(IrcCommand::from_irc_line)
+            .ok_or(())
     }
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
@@ -248,12 +286,11 @@ impl Value for Command {
         &self,
         _record: &Record,
         key: &'static str,
-        serializer: &mut Serializer
+        serializer: &mut dyn Serializer,
     ) -> Result<(), SlogSerError> {
         serializer.emit_str(key, self.to_str())
     }
 }
-
 
 use pest::prelude::*;
 
@@ -292,7 +329,6 @@ impl_rdp! {
     }
 }
 
-
 pub fn parse_irc_line(line: &str) -> Option<IrcLine> {
     let mut parser = Rdp::new(StringInput::new(line));
 
@@ -300,19 +336,27 @@ pub fn parse_irc_line(line: &str) -> Option<IrcLine> {
         return None;
     }
 
-    let builder = parser.queue().iter().fold(IrcLineBuilder::default(), |mut builder, token| {
-        match token.rule {
-            Rule::prefix => builder.prefix = Some(line[token.start..token.end].into()),
-            Rule::command => builder.command = Some(line[token.start..token.end].into()),
-            Rule::param |
-            Rule::trailing_param => builder.args.push(line[token.start..token.end].into()),
-            Rule::any | Rule::soi | Rule::eoi => {}
-        };
+    let builder = parser
+        .queue()
+        .iter()
+        .fold(IrcLineBuilder::default(), |mut builder, token| {
+            match token.rule {
+                Rule::prefix => builder.prefix = Some(line[token.start..token.end].into()),
+                Rule::command => builder.command = Some(line[token.start..token.end].into()),
+                Rule::param | Rule::trailing_param => {
+                    builder.args.push(line[token.start..token.end].into())
+                }
+                Rule::any | Rule::soi | Rule::eoi => {}
+            };
 
-        builder
-    });
+            builder
+        });
 
-    let IrcLineBuilder { prefix, command, args } = builder;
+    let IrcLineBuilder {
+        prefix,
+        command,
+        args,
+    } = builder;
 
     Some(IrcLine {
         prefix: prefix,
@@ -320,7 +364,6 @@ pub fn parse_irc_line(line: &str) -> Option<IrcLine> {
         args: args,
     })
 }
-
 
 #[derive(Debug, Clone, Copy)]
 pub enum Numeric {
@@ -365,66 +408,81 @@ impl<'a> From<Numeric> for &'a str {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn simple_nick() {
-        assert_eq!(parse_irc_line("NICK test"),
-                   Some(IrcLine {
-                       prefix: None,
-                       command: Command::Nick,
-                       args: vec!["test".into()],
-                   }));
+        assert_eq!(
+            parse_irc_line("NICK test"),
+            Some(IrcLine {
+                prefix: None,
+                command: Command::Nick,
+                args: vec!["test".into()],
+            })
+        );
 
-        assert_eq!("NICK test".parse().ok(),
-                   Some(IrcCommand::Nick { nick: "test".into() }));
+        assert_eq!(
+            "NICK test".parse().ok(),
+            Some(IrcCommand::Nick {
+                nick: "test".into()
+            })
+        );
     }
 
     #[test]
     fn simple_user() {
-        assert_eq!(parse_irc_line("USER test * * :Real Name"),
-                   Some(IrcLine {
-                       prefix: None,
-                       command: Command::User,
-                       args: vec!["test".into(), "*".into(), "*".into(), "Real Name".into()],
-                   }));
+        assert_eq!(
+            parse_irc_line("USER test * * :Real Name"),
+            Some(IrcLine {
+                prefix: None,
+                command: Command::User,
+                args: vec!["test".into(), "*".into(), "*".into(), "Real Name".into()],
+            })
+        );
 
-        assert_eq!("USER test * * :Real Name".parse().ok(),
-                   Some(IrcCommand::User {
-                       user: "test".into(),
-                       real_name: "Real Name".into(),
-                   }));
+        assert_eq!(
+            "USER test * * :Real Name".parse().ok(),
+            Some(IrcCommand::User {
+                user: "test".into(),
+                real_name: "Real Name".into(),
+            })
+        );
     }
 
     #[test]
     fn simple_prefix() {
-        assert_eq!(parse_irc_line(":example.com PRIVMSG #test :Some text"),
-                   Some(IrcLine {
-                       prefix: Some("example.com".into()),
-                       command: Command::PrivMsg,
-                       args: vec!["#test".into(), "Some text".into()],
-                   }));
+        assert_eq!(
+            parse_irc_line(":example.com PRIVMSG #test :Some text"),
+            Some(IrcLine {
+                prefix: Some("example.com".into()),
+                command: Command::PrivMsg,
+                args: vec!["#test".into(), "Some text".into()],
+            })
+        );
 
-        assert_eq!(":example.com PRIVMSG #test :Some text".parse().ok(),
-                   Some(IrcCommand::PrivMsg {
-                       channel: "#test".into(),
-                       text: "Some text".into(),
-                   }));
+        assert_eq!(
+            ":example.com PRIVMSG #test :Some text".parse().ok(),
+            Some(IrcCommand::PrivMsg {
+                channel: "#test".into(),
+                text: "Some text".into(),
+            })
+        );
     }
 
     #[test]
     fn simple_numeric() {
-        assert_eq!(parse_irc_line("001 test :Some text"),
-                   Some(IrcLine {
-                       prefix: None,
-                       command: Command::Numeric {
-                           code: 1,
-                           string: *b"001",
-                       },
-                       args: vec!["test".into(), "Some text".into()],
-                   }))
+        assert_eq!(
+            parse_irc_line("001 test :Some text"),
+            Some(IrcLine {
+                prefix: None,
+                command: Command::Numeric {
+                    code: 1,
+                    string: *b"001",
+                },
+                args: vec!["test".into(), "Some text".into()],
+            })
+        )
     }
 }

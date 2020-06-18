@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::ConnectionContext;
 
-use futures::{Async, Poll, task};
 use futures::stream::Stream;
+use futures::{task, Async, Poll};
 
+use std::fmt::Write;
 use std::io::{self, Cursor};
 use std::sync::{Arc, Mutex};
-use std::fmt::Write;
 
-use super::protocol::{Numeric, IrcCommand};
+use super::protocol::{IrcCommand, Numeric};
 
 use tokio_io::{AsyncRead, AsyncWrite};
-
 
 pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
     conn: S,
@@ -39,12 +37,12 @@ pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
 impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
     pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
-            conn: conn,
+            conn,
             read_buffer: Vec::with_capacity(1024),
             inner: Arc::new(Mutex::new(IrcServerConnectionInner::new())),
             closed: false,
             ctx: context,
-            server_name: server_name,
+            server_name,
         }
     }
 
@@ -76,12 +74,22 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
     }
 
     pub fn write_numeric(&mut self, numeric: Numeric, nick: &str, rest_of_line: &str) {
-        let line = format!(":{} {} {} {}", &self.server_name, numeric.as_str(), nick, rest_of_line);
+        let line = format!(
+            ":{} {} {} {}",
+            &self.server_name,
+            numeric.as_str(),
+            nick,
+            rest_of_line
+        );
         self.write_line(&line);
     }
 
     pub fn welcome(&mut self, nick: &str) {
-        self.write_numeric(Numeric::RplWelcome, nick, ":Welcome to the Matrix Internet Relay Network");
+        self.write_numeric(
+            Numeric::RplWelcome,
+            nick,
+            ":Welcome to the Matrix Internet Relay Network",
+        );
 
         let motd_start = format!(":- {} Message of the day -", self.server_name);
         self.write_numeric(Numeric::RplMotdstart, nick, &motd_start);
@@ -104,12 +112,16 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
         for iter in names.chunks(10) {
             let mut line = format!("@ {} :", channel);
             for &(nick, op) in iter {
-                write!(line, "{}{} ", if op {"@"} else {""}, &nick).unwrap();
+                write!(line, "{}{} ", if op { "@" } else { "" }, &nick).unwrap();
             }
-            line.trim();
+            let line = line.trim();
             self.write_numeric(Numeric::RplNamreply, nick, &line);
         }
-        self.write_numeric(Numeric::RplEndofnames, nick, &format!("{} :End of /NAMES", channel));
+        self.write_numeric(
+            Numeric::RplEndofnames,
+            nick,
+            &format!("{} :End of /NAMES", channel),
+        );
     }
 
     fn poll_read(&mut self) -> Poll<IrcCommand, io::Error> {
@@ -118,7 +130,7 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
                 let to_return = self.read_buffer.drain(..pos + 1).collect();
                 match String::from_utf8(to_return) {
                     Ok(line) => {
-                        let line = line.trim_right().to_string();
+                        let line = line.trim_end().to_string();
                         if let Ok(irc_line) = line.parse() {
                             trace!(self.ctx.logger, "Got IRC line"; "line" => line);
                             return Ok(Async::Ready(irc_line));
@@ -179,12 +191,14 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
 
             let bytes_written = {
                 let to_write = &inner.write_buffer.get_ref()[pos..];
-                try_nb!(self.conn.write(to_write))
+                tokio_core::try_nb!(self.conn.write(to_write))
             };
 
-            inner.write_buffer.set_position((pos + bytes_written) as u64);
+            inner
+                .write_buffer
+                .set_position((pos + bytes_written) as u64);
 
-            try_nb!(self.conn.flush());
+            tokio_core::try_nb!(self.conn.flush());
         }
     }
 }
@@ -213,7 +227,6 @@ impl<S: AsyncRead + AsyncWrite> Stream for IrcServerConnection<S> {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 struct IrcServerConnectionInner {

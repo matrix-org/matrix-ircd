@@ -12,41 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{Async, Future, Poll};
 use futures::stream::Stream;
+use futures::{Async, Future, Poll};
 
 use std::mem;
-
 
 /// A Stream adapater, similar to fold, that consumes the start of the stream to build up an
 /// object, but then returns both the object *and* the stream.
 #[must_use = "futures do nothing unless polled"]
-pub struct StreamFold<I, E, S: Stream<Item=I, Error=E>, V, F: FnMut(I, V) -> (bool, V)> {
+pub struct StreamFold<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)> {
     func: F,
-    state: StreamFoldState<S, V>
+    state: StreamFoldState<S, V>,
 }
 
-impl<I, E, S: Stream<Item=I, Error=E>, V, F: FnMut(I, V) -> (bool, V)> StreamFold<I, E, S, V, F> {
+impl<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)>
+    StreamFold<I, E, S, V, F>
+{
     pub fn new(stream: S, value: V, func: F) -> StreamFold<I, E, S, V, F> {
         StreamFold {
             func: func,
             state: StreamFoldState::Full {
                 stream: stream,
                 value: value,
-            }
+            },
         }
     }
 }
 
 enum StreamFoldState<S, V> {
     Empty,
-    Full {
-        stream: S,
-        value: V,
-    }
+    Full { stream: S, value: V },
 }
 
-impl<I, E, S: Stream<Item=I, Error=E>, V, F: FnMut(I, V) -> (bool, V)> Future for StreamFold<I, E, S, V, F> {
+impl<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)> Future
+    for StreamFold<I, E, S, V, F>
+{
     type Item = Option<(V, S)>;
     type Error = E;
 
@@ -62,15 +62,16 @@ impl<I, E, S: Stream<Item=I, Error=E>, V, F: FnMut(I, V) -> (bool, V)> Future fo
                     let (done, val) = (self.func)(item, value);
                     value = val;
                     if done {
-                        return Ok(Async::Ready(Some((value, stream))))
+                        return Ok(Async::Ready(Some((value, stream))));
                     }
                 }
-                Async::Ready(None) => {
-                    return Ok(Async::Ready(None))
-                }
+                Async::Ready(None) => return Ok(Async::Ready(None)),
                 Async::NotReady => {
-                    self.state = StreamFoldState::Full { stream: stream, value: value };
-                    return Ok(Async::NotReady)
+                    self.state = StreamFoldState::Full {
+                        stream: stream,
+                        value: value,
+                    };
+                    return Ok(Async::NotReady);
                 }
             }
         }

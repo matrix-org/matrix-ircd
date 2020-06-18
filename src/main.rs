@@ -15,63 +15,32 @@
 //! Matrix IRCd is an IRCd implementation backed by Matrix, allowing IRC clients to interact
 //! directly with a Matrix home server.
 
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate serde;
-#[macro_use]
-extern crate futures;
-#[macro_use]
-extern crate tokio_core;
-extern crate tokio_proto;
-extern crate tokio_io;
-extern crate tokio_tls;
-extern crate tokio_dns;
+// TODO: move this one to `use` format as well. It turns out its actually pretty difficult with
+// ~50 errors and importing the macros in the files still results in errors
 #[macro_use]
 extern crate slog;
-extern crate slog_async;
-extern crate slog_term;
-extern crate url;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate pest;
-#[macro_use]
-extern crate quick_error;
-extern crate openssl;
-#[macro_use]
-extern crate clap;
-extern crate httparse;
-extern crate netbuf;
-extern crate rand;
-extern crate tasked_futures;
-extern crate native_tls;
-extern crate regex;
 
+use clap::{App, Arg};
 
-use clap::{Arg, App};
-
-use futures::Future;
 use futures::stream::Stream;
+use futures::Future;
 
 use slog::Drain;
 
 use std::cell::RefCell;
-use std::net::SocketAddr;
 use std::fs::File;
 use std::io::{self, Read};
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 
-use native_tls::{TlsAcceptor, Identity};
+use native_tls::{Identity, TlsAcceptor};
 
 use tasked_futures::TaskExecutor;
 
-
-
-lazy_static! {
+lazy_static::lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
         let decorator = slog_term::TermDecorator::new().build();
         let drain = slog_term::CompactFormat::new(decorator).build().fuse();
@@ -80,21 +49,18 @@ lazy_static! {
     };
 }
 
-
-task_local! {
+futures::task_local! {
     // A task local context describing the connection (from an IRC client).
     static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
 }
 
-
 #[macro_use]
 pub mod macros;
 pub mod bridge;
+pub mod http;
 pub mod irc;
 pub mod matrix;
 pub mod stream_fold;
-pub mod http;
-
 
 /// A task local context describing the connection (from an IRC client).
 #[derive(Clone)]
@@ -103,58 +69,61 @@ pub struct ConnectionContext {
     peer_addr: SocketAddr,
 }
 
-
 fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, String> {
     File::open(&cert_file)
-    .and_then(|mut file| {
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-        Ok(buf)
-    })
-    .map_err(|err| format!("Failed to load Pkcs12: {}", err))
-    .and_then(|buf| {
-        Identity::from_pkcs12(&buf, password)
+        .and_then(|mut file| {
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)?;
+            Ok(buf)
+        })
         .map_err(|err| format!("Failed to load Pkcs12: {}", err))
-    })
+        .and_then(|buf| {
+            Identity::from_pkcs12(&buf, password)
+                .map_err(|err| format!("Failed to load Pkcs12: {}", err))
+        })
 }
 
 fn main() {
     let matches = App::new("IRC Matrix Daemon")
-        .version(crate_version!())
-        .author(crate_authors!())
-        .arg(Arg::with_name("BIND")
-            .short("b")
-            .long("bind")
-            .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
-            .takes_value(true)
-            .validator(|addr| {
-                addr.parse::<SocketAddr>()
-                .map(|_| ())
-                .map_err(|err| format!("Invalid bind address: {}", err))
-            })
+        .version(clap::crate_version!())
+        .author(clap::crate_authors!())
+        .arg(
+            Arg::with_name("BIND")
+                .short("b")
+                .long("bind")
+                .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
+                .takes_value(true)
+                .validator(|addr| {
+                    addr.parse::<SocketAddr>()
+                        .map(|_| ())
+                        .map_err(|err| format!("Invalid bind address: {}", err))
+                }),
         )
-        .arg(Arg::with_name("PKCS12")
-            .long("pkcs12")
-            .help("Sets the PKCS#12 file to read TLS cert and pkeyfrom")
-            .takes_value(true)
-            .requires("PASSWORD")
+        .arg(
+            Arg::with_name("PKCS12")
+                .long("pkcs12")
+                .help("Sets the PKCS#12 file to read TLS cert and pkeyfrom")
+                .takes_value(true)
+                .requires("PASSWORD"),
         )
-        .arg(Arg::with_name("PASSWORD")
-            .long("password")
-            .help("The password of the PKCS#12 file")
-            .takes_value(true)
-             .requires("PKCS12")
+        .arg(
+            Arg::with_name("PASSWORD")
+                .long("password")
+                .help("The password of the PKCS#12 file")
+                .takes_value(true)
+                .requires("PKCS12"),
         )
-        .arg(Arg::with_name("MATRIX_HS")
-            .long("url")
-            .help("The base url of the Matrix HS")
-            .required(true)
-            .takes_value(true)
-            .validator(|hs| {
-                url::Url::parse(&hs)
-                .map(|_| ())
-                .map_err(|err| format!("Invalid url: {}", err))
-            })
+        .arg(
+            Arg::with_name("MATRIX_HS")
+                .long("url")
+                .help("The base url of the Matrix HS")
+                .required(true)
+                .takes_value(true)
+                .validator(|hs| {
+                    url::Url::parse(&hs)
+                        .map(|_| ())
+                        .map_err(|err| format!("Invalid url: {}", err))
+                }),
         )
         .get_matches();
 
@@ -220,24 +189,29 @@ fn main() {
 
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
-            let future = setup_future.and_then(move |socket| {
-                acceptor.accept(socket)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-            })
-            .map_err(move |err| {
-                task_warn!("TLS handshake failed"; "error" => format!("{}", err));
-            })
-            .and_then(move |tls_socket| {
-                // the Bridge::create returns a future that resolves to a Bridge object. The
-                // Bridge object is *also* a future that we want to wait on, so we use `flatten()`
-                bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
-                .map(|bridge| bridge.into_future())
-                .flatten()
-                .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)))
-            }).then(|r| {
-                task_info!("Finished");
-                r
-            });
+            let future = setup_future
+                .and_then(move |socket| {
+                    acceptor
+                        .accept(socket)
+                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+                })
+                .map_err(move |err| {
+                    task_warn!("TLS handshake failed"; "error" => format!("{}", err));
+                })
+                .and_then(move |tls_socket| {
+                    // the Bridge::create returns a future that resolves to a Bridge object. The
+                    // Bridge object is *also* a future that we want to wait on, so we use `flatten()`
+                    bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
+                        .map(|bridge| bridge.into_future())
+                        .flatten()
+                        .map_err(
+                            |err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)),
+                        )
+                })
+                .then(|r| {
+                    task_info!("Finished");
+                    r
+                });
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
@@ -245,12 +219,12 @@ fn main() {
         } else {
             // Same as above except with less TLS.
             let future = setup_future
-            .and_then(move |socket| {
-                bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
-            })
-            .map(|bridge| bridge.into_future())
-            .flatten()
-            .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
+                .and_then(move |socket| {
+                    bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
+                })
+                .map(|bridge| bridge.into_future())
+                .flatten()
+                .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
 
             handle.spawn(future);
         };
