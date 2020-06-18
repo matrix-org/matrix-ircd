@@ -14,16 +14,14 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use serde_json;
-use serde::{Serialize, Deserialize};
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncResponse {
     pub next_batch: String,
     pub rooms: RoomsSyncResponse,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomsSyncResponse {
@@ -90,7 +88,6 @@ pub struct RoomJoinResponse {
     pub room_id: String,
 }
 
-
 #[derive(Debug, Clone, Serialize)]
 pub struct RoomSendInput {
     pub msgtype: String,
@@ -102,11 +99,10 @@ pub struct RoomSendResponse {
     pub event_id: String,
 }
 
-
 #[cfg(test)]
 mod tests {
-    use serde_json;
     use super::*;
+    use serde_json;
 
     #[test]
     fn sync_response() {

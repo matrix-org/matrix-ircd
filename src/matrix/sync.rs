@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{Async, Future, Poll};
 use futures::stream::Stream;
+use futures::{Async, Future, Poll};
 
 use serde_json;
 
@@ -25,10 +25,9 @@ use tokio_core::reactor::Handle;
 
 use url::Url;
 
-use crate::http::{Request, HttpClient, HttpResponseFuture};
+use crate::http::{HttpClient, HttpResponseFuture, Request};
 
 use slog::*;
-
 
 pub struct MatrixSyncClient {
     url: Url,
@@ -84,15 +83,15 @@ impl MatrixSyncClient {
                         headers: vec![],
                         body: vec![],
                     }));
-                    continue
+                    continue;
                 };
 
                 let response = match current_sync.poll() {
                     Ok(Async::Ready(r)) => r,
                     Ok(Async::NotReady) => {
                         self.current_sync = Some(current_sync);
-                        return Ok(Async::NotReady)
-                    },
+                        return Ok(Async::NotReady);
+                    }
                     Err(e) => {
                         task_info!("Error doing sync"; "error" => format!("{}", e));
                         self.current_sync = None;
@@ -101,11 +100,17 @@ impl MatrixSyncClient {
                 };
 
                 if response.code != 200 {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Sync returned {}", response.code)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Sync returned {}", response.code),
+                    ));
                 }
 
                 serde_json::from_slice(&response.data).map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("Sync returned invalid JSON: {}", e))
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Sync returned invalid JSON: {}", e),
+                    )
                 })?
             };
 
@@ -113,7 +118,7 @@ impl MatrixSyncClient {
 
             self.next_token = Some(sync_response.next_batch.clone());
 
-            return Ok(Async::Ready(sync_response))
+            return Ok(Async::Ready(sync_response));
         }
     }
 }
