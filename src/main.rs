@@ -22,8 +22,11 @@ extern crate slog;
 
 use clap::{App, Arg};
 
-use futures::stream::Stream;
-use futures::Future;
+//use futures::stream::Stream;
+//use futures::Future;
+
+use futures3::stream::StreamExt;
+use futures3::{Future, Stream};
 
 use slog::Drain;
 
@@ -33,12 +36,15 @@ use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use tokio_core::net::TcpListener;
-use tokio_core::reactor::Core;
+use tokio::net::TcpListener;
+//use tokio_core::net::TcpListener;
+//use tokio_core::reactor::Core;
 
 use native_tls::{Identity, TlsAcceptor};
 
-use tasked_futures::TaskExecutor;
+//use tasked_futures::TaskExecutor;
+
+use std::task::Context;
 
 lazy_static::lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
@@ -56,11 +62,11 @@ futures::task_local! {
 
 #[macro_use]
 pub mod macros;
-//pub mod bridge;
+pub mod bridge;
 pub mod http;
 pub mod irc;
 pub mod matrix;
-//pub mod stream_fold;
+pub mod stream_fold;
 
 /// A task local context describing the connection (from an IRC client).
 #[derive(Clone)]
@@ -83,81 +89,87 @@ fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, St
         })
 }
 
-fn main() {
-    //let matches = App::new("IRC Matrix Daemon")
-    //    .version(clap::crate_version!())
-    //    .author(clap::crate_authors!())
-    //    .arg(
-    //        Arg::with_name("BIND")
-    //            .short("b")
-    //            .long("bind")
-    //            .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
-    //            .takes_value(true)
-    //            .validator(|addr| {
-    //                addr.parse::<SocketAddr>()
-    //                    .map(|_| ())
-    //                    .map_err(|err| format!("Invalid bind address: {}", err))
-    //            }),
-    //    )
-    //    .arg(
-    //        Arg::with_name("PKCS12")
-    //            .long("pkcs12")
-    //            .help("Sets the PKCS#12 file to read TLS cert and pkeyfrom")
-    //            .takes_value(true)
-    //            .requires("PASSWORD"),
-    //    )
-    //    .arg(
-    //        Arg::with_name("PASSWORD")
-    //            .long("password")
-    //            .help("The password of the PKCS#12 file")
-    //            .takes_value(true)
-    //            .requires("PKCS12"),
-    //    )
-    //    .arg(
-    //        Arg::with_name("MATRIX_HS")
-    //            .long("url")
-    //            .help("The base url of the Matrix HS")
-    //            .required(true)
-    //            .takes_value(true)
-    //            .validator(|hs| {
-    //                url::Url::parse(&hs)
-    //                    .map(|_| ())
-    //                    .map_err(|err| format!("Invalid url: {}", err))
-    //            }),
-    //    )
-    //    .get_matches();
+#[tokio::main]
+async fn main() {
+    let matches = App::new("IRC Matrix Daemon")
+        .version(clap::crate_version!())
+        .author(clap::crate_authors!())
+        .arg(
+            Arg::with_name("BIND")
+                .short("b")
+                .long("bind")
+                .help("Sets the address to bind to. Defaults to 127.0.0.1:5999")
+                .takes_value(true)
+                .validator(|addr| {
+                    addr.parse::<SocketAddr>()
+                        .map(|_| ())
+                        .map_err(|err| format!("Invalid bind address: {}", err))
+                }),
+        )
+        .arg(
+            Arg::with_name("PKCS12")
+                .long("pkcs12")
+                .help("Sets the PKCS#12 file to read TLS cert and pkeyfrom")
+                .takes_value(true)
+                .requires("PASSWORD"),
+        )
+        .arg(
+            Arg::with_name("PASSWORD")
+                .long("password")
+                .help("The password of the PKCS#12 file")
+                .takes_value(true)
+                .requires("PKCS12"),
+        )
+        .arg(
+            Arg::with_name("MATRIX_HS")
+                .long("url")
+                .help("The base url of the Matrix HS")
+                .required(true)
+                .takes_value(true)
+                .validator(|hs| {
+                    url::Url::parse(&hs)
+                        .map(|_| ())
+                        .map_err(|err| format!("Invalid url: {}", err))
+                }),
+        )
+        .get_matches();
 
-    //let log = &DEFAULT_LOGGER;
+    let log = &DEFAULT_LOGGER;
 
-    //info!(log, "Starting up");
+    info!(log, "Starting up");
 
-    //let bind_addr = matches.value_of("BIND").unwrap_or("127.0.0.1:5999");
-    //let addr = bind_addr.parse::<SocketAddr>().unwrap();
-    //let matrix_url = url::Url::parse(matches.value_of("MATRIX_HS").unwrap()).unwrap();
+    let bind_addr = matches.value_of("BIND").unwrap_or("127.0.0.1:5999");
+    let addr = bind_addr.parse::<SocketAddr>().unwrap();
+    let matrix_url = url::Url::parse(matches.value_of("MATRIX_HS").unwrap()).unwrap();
 
-    //let mut tls = false;
-    //let tls_acceptor = if let Some(pkcs12_file) = matches.value_of("PKCS12") {
-    //    tls = true;
+    let mut tls = false;
+    let tls_acceptor = if let Some(pkcs12_file) = matches.value_of("PKCS12") {
+        tls = true;
 
-    //    let pass = matches.value_of("PASSWORD").unwrap();
+        let pass = matches.value_of("PASSWORD").unwrap();
 
-    //    let pkcs12 = load_pkcs12_from_file(pkcs12_file, pass).expect("error reading pkcs12");
-    //    let acceptor = TlsAcceptor::builder(pkcs12).build().unwrap();
-    //    let tokio_acceptor = tokio_tls::TlsAcceptor::from(acceptor);
-    //    Some(Arc::new(tokio_acceptor))
-    //} else {
-    //    None
-    //};
+        let pkcs12 = load_pkcs12_from_file(pkcs12_file, pass).expect("error reading pkcs12");
+        let acceptor = TlsAcceptor::builder(pkcs12).build().unwrap();
+        let tokio_acceptor = tokio_tls::TlsAcceptor::from(acceptor);
+        Some(Arc::new(tokio_acceptor))
+    } else {
+        None
+    };
 
-    //let mut l = Core::new().unwrap();
-    //let handle = l.handle();
+    let socket = Box::pin(TcpListener::bind(&addr).await.unwrap().incoming());
 
-    //let socket = TcpListener::bind(&addr, &handle).unwrap();
+    info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
-    //info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
+    // This is the main loop where we accept incoming *TCP* connections.
+    //while let Some(Ok(tcp_stream)) = socket.next().await {
+    //    //.for_each(move |(socket, addr)| {
+    //    let addr = if let Ok(addr) = tcp_stream.peer_addr() {
+    //        addr
+    //    } else {
+    //        // TODO: log this
+    //        continue;
+    //    };
 
-    //// This is the main loop where we accept incoming *TCP* connections.
-    //let done = socket.incoming().for_each(move |(socket, addr)| {
     //    let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
     //    let ctx = ConnectionContext {
@@ -165,12 +177,12 @@ fn main() {
     //        peer_addr: addr,
     //    };
 
-    //    let new_handle = handle.clone();
+    //    //let new_handle = handle.clone();
 
     //    let cloned_ctx = ctx.clone();
 
     //    // Set up a new task for the connection. We do this early so that the logging is correct.
-    //    let setup_future = futures::lazy(move || {
+    //    let setup_future = futures3::future::lazy(move |cx: &mut Context| {
     //        debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
 
     //        CONTEXT.with(|m| {
@@ -179,6 +191,8 @@ fn main() {
 
     //        Ok(socket)
     //    });
+
+    //    //let setup_future = Box::pin(setup_future);
 
     //    // TODO: This should be configurable. Maybe use the matrix HS server_name?
     //    let irc_server_name = "localhost".into();
@@ -189,47 +203,42 @@ fn main() {
 
     //    if let Some(acceptor) = tls_acceptor.clone() {
     //        // Do the TLS handshake and then set up the bridge
-    //        let future = setup_future
-    //            .and_then(move |socket| {
-    //                acceptor
-    //                    .accept(socket)
-    //                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-    //            })
-    //            .map_err(move |err| {
-    //                task_warn!("TLS handshake failed"; "error" => format!("{}", err));
-    //            })
-    //            .and_then(move |tls_socket| {
-    //                // the Bridge::create returns a future that resolves to a Bridge object. The
-    //                // Bridge object is *also* a future that we want to wait on, so we use `flatten()`
-    //                bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
-    //                    .map(|bridge| bridge.into_future())
-    //                    .flatten()
-    //                    .map_err(
-    //                        |err: Box<dyn futures::Future<Error = bridge::Error, Item = _>>| task_warn!("Unhandled IO error"; "error" => format!("{}", err)),
-    //                    )
-    //            })
-    //            .then(|r| {
-    //                task_info!("Finished");
-    //                r
-    //            });
+    //        let spawn_fut = futures3::future::lazy(move |cx: &mut Context| async {
+
+    //            //let future = setup_future.await;
+    //            let socket= setup_future.await.unwrap();
+    //            //let tls_socket = acceptor.accept(socket).await.map_err(|err| {
+    //            //    task_warn!("TLS handshake failed"; "error" => format!("{}", err));
+    //            //    io::Error::new(io::ErrorKind::Other, err);
+    //            //}).unwrap();
+
+    //            //let bridge = bridge::Bridge::create(cloned_url, socket, irc_server_name, ctx).await;
+    //                        //.map_err(
+    //                        //    //|err: Box<dyn futures3::future::Future<Output=Result<_, bridge::Error>>>| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
+    //                        //    |err| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
+    //                        //);
+
+    //            task_info!("Finished");
+
+    //        });
 
     //        // We spawn the future off, otherwise we'd block the stream of incoming connections.
     //        // This is what causes the future to be in its own chain.
-    //        handle.spawn(future);
-    //    } else {
-    //        // Same as above except with less TLS.
-    //        let future = setup_future
-    //            .and_then(move |socket| {
-    //                bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
-    //            })
-    //            .map(|bridge| bridge.into_future())
-    //            .flatten()
-    //            .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
-
     //        //handle.spawn(future);
+    //        tokio::spawn(spawn_fut);
+    //    } else {
+    //       // // Same as above except with less TLS.
+    //       // let future = setup_future
+    //       //     .and_then(move |socket| {
+    //       //         bridge::Bridge::create(cloned_url, socket, irc_server_name, ctx)
+    //       //     })
+    //       //     .map(|bridge| bridge.into_future())
+    //       //     .flatten()
+    //       //     .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
+
+    //       // //handle.spawn(future);
     //    };
 
-    //    Ok(())
-    //});
-    //l.run(done).unwrap();
+    //}
+    ////l.run(done).unwrap();
 }

@@ -34,12 +34,14 @@ use futures3::task::Poll;
 use std::boxed::Box;
 use std::io;
 use std::pin::Pin;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use slog::{debug, info, trace};
 
 use std::task::Context;
 
-pub struct IrcUserConnection<S: AsyncRead + AsyncWrite + Clone> {
+pub struct IrcUserConnection<S: AsyncRead + AsyncWrite > {
     conn: Pin<Box<transport::IrcServerConnection<S>>>,
     pub user: String,
     pub nick: String,
@@ -52,14 +54,14 @@ pub struct IrcUserConnection<S: AsyncRead + AsyncWrite + Clone> {
 
 #[derive(Debug, Clone, Default)]
 struct UserNickBuilder {
-    nick: Option<String>,
-    user: Option<String>,
-    real_name: Option<String>,
-    password: Option<String>,
+     nick: Option<String>,
+     user: Option<String>,
+     real_name: Option<String>,
+     password: Option<String>,
 }
 
 impl UserNickBuilder {
-    pub(crate) fn to_user_nick(self) -> UserNick {
+    fn to_user_nick(self) -> UserNick {
         UserNick {
             nick: self.nick.unwrap(),
             user: self.user.unwrap(),
@@ -67,22 +69,12 @@ impl UserNickBuilder {
             password: self.password.unwrap(),
         }
     }
-}
-
-impl Future for UserNickBuilder {
-    type Output = UserNickBuilder;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        if self.nick.is_some()
+    fn is_complete(&self) -> bool {
+        self.nick.is_some()
             && self.user.is_some()
             && self.real_name.is_some()
             && self.real_name.is_some()
             && self.password.is_some()
-        {
-            Poll::Ready(self.clone())
-        } else {
-            Poll::Pending
-        }
     }
 }
 
@@ -94,9 +86,9 @@ struct UserNick {
     password: String,
 }
 
-impl<S> IrcUserConnection<S> 
+impl<S> IrcUserConnection<S>
 where
-    S: AsyncRead + AsyncWrite + Clone + 'static 
+    S: AsyncRead + AsyncWrite + Clone + 'static,
 {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
     pub async fn await_login(
@@ -109,44 +101,45 @@ where
             transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
 
         let ctx_clone = ctx.clone();
-
-        let irc_user: UserNick = irc_conn.clone().fold(UserNickBuilder::default(), move |mut user_nick: UserNickBuilder, cmd: Result<IrcCommand, _> | {
-            let inner_cmd = match cmd {
-                Ok(good_command) => {
-                trace!(ctx.logger, "Got command"; "command" => good_command.command());
-
-                good_command
-                }
-                Err(e) => {
-                    trace!(ctx.logger, "Error when streaming commands: "; "Error" => e.to_string());
-                    return user_nick
-                }
-
+        
+        let function = move |state: &RefCell<UserNickBuilder>, update: Result<IrcCommand, io::Error>| {
+            let update = match update {
+                Ok(good_update) => good_update,
+                Err(_) => return false
             };
 
-            match inner_cmd {
-                IrcCommand::Nick { nick } => user_nick.nick = Some(nick),
-                IrcCommand::User { user, real_name } => {
-                    user_nick.user = Some(user);
-                    user_nick.real_name = Some(real_name);
-                }
-                IrcCommand::Pass { password } => user_nick.password = Some(password),
-                c => {
-                    debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
-                }
-            }
+            let mut state = state.try_borrow_mut().expect("");
 
-            // user_nick future only completes when all fields are filled
-            // TODO: figure out what happens here when the IRC connection dies
-            // TODO: make sure this future doesnt hang indefinitely
-            user_nick
-        }).await.to_user_nick();
+            match update {
+                    IrcCommand::Nick { nick } => state.nick = Some(nick),
+                    IrcCommand::User { user, real_name } => {
+                        state.user = Some(user);
+                        state.real_name = Some(real_name);
+                    }
+                    IrcCommand::Pass { password } => state.password = Some(password),
+                    c => {
+                        debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
+                    }
+            }
+            state.is_complete()
+        };
+
+        //let irc_conn = Rc::new(irc_conn);
+        //let user_nick = Rc::new(RefCell::new(UserNickBuilder::default()));
+
+        let folder = crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::default(), Box::new(function));
+        (&folder).await;
+
+        let (irc_conn, user_nick) = folder.into_parts();
+
+        let irc_user = user_nick.to_user_nick();
+
 
         info!(ctx_clone.logger, "got nick and user");
         let user_prefix = format!("{}!{}@{}", &irc_user.nick, &irc_user.user, &server_name);
 
         let user_conn = IrcUserConnection {
-            conn: Box::pin(irc_conn),
+            conn: irc_conn,
             user: irc_user.user,
             nick: irc_user.nick,
             real_name: irc_user.real_name,
@@ -163,6 +156,7 @@ where
         );
 
         Ok(user_conn)
+        
     }
 
     pub fn nick_exists(&self, nick: &str) -> bool {

@@ -28,10 +28,9 @@ use super::protocol::{IrcCommand, Numeric};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-#[derive(Clone)]
 pub struct IrcServerConnection<S>
 where
-    S: Clone + AsyncRead + AsyncWrite,
+    S: AsyncRead + AsyncWrite,
 {
     conn: Pin<Box<S>>,
     read_buffer: Vec<u8>,
@@ -41,9 +40,9 @@ where
     server_name: String,
 }
 
-impl<S: Clone> IrcServerConnection<S>
+impl<S> IrcServerConnection<S>
 where
-    S: Clone + AsyncWrite + AsyncRead,
+    S: AsyncWrite + AsyncRead,
 {
     pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
@@ -256,7 +255,7 @@ where
     }
 }
 
-impl<S: AsyncRead + AsyncWrite + Clone> Stream for IrcServerConnection<S> {
+impl<S: AsyncRead + AsyncWrite> Stream for IrcServerConnection<S> {
     type Item = Result<IrcCommand, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {

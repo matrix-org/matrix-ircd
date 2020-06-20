@@ -22,82 +22,55 @@ use std::mem;
 use std::ops::Deref;
 use std::pin::Pin;
 
-/// A Stream adapater, similar to fold, that consumes the start of the stream to build up an
-/// object, but then returns both the object *and* the stream.
 #[must_use = "futures do nothing unless polled"]
-pub struct StreamFold<I, E, S: Stream<Item = Result<I, E>>, V, F: FnMut(I, V) -> (bool, V)> {
-    func: F,
-    state: State<S, V>,
+pub struct StreamFold<S, W, T, V>
+where
+    S: Stream<Item = Result<T, V>>,
+{
+    stream: RefCell<Pin<Box<S>>>,
+    // function takes in the accumulator (state) for the first argument and
+    // the output from the stream as the second argument
+    // returns true if it is finished accumulating and we should complete the future
+    // In the future it might just return Poll.
+    function: Box<dyn Fn(&RefCell<W>, Result<T, V>) -> bool>,
+    // The variable that is being updated with every new value from self.stream
+    state: RefCell<W>,
 }
 
-impl<I, E, S: Stream<Item = Result<I, E>>, V, F: FnMut(I, V) -> (bool, V)>
-    StreamFold<I, E, S, V, F>
-{
-    pub fn new(stream: S, value: V, func: F) -> StreamFold<I, E, S, V, F> {
+impl<W, T, V, S: Stream<Item = Result<T, V>>> StreamFold<S, W, T, V> {
+    pub fn new(
+        stream: S,
+        state: W,
+        function: Box<dyn Fn(&RefCell<W>, Result<T, V>) -> bool>,
+    ) -> StreamFold<S, W, T, V> {
         StreamFold {
-            func,
-            state: State {
-                stream: Box::pin(stream),
-                value,
-            },
+            state: RefCell::new(state),
+            stream: RefCell::new(Box::pin(stream)),
+            function,
         }
+    }
+
+    pub fn into_parts(self) -> (Pin<Box<S>>, W) {
+        (self.stream.into_inner(), self.state.into_inner())
     }
 }
 
-enum StreamFoldState<S, V> {
-    Empty,
-    Full(State<S, V>),
-}
-
-struct State<S, V> {
-    stream: Pin<Box<S>>,
-    value: V,
-}
-
-struct StreamCell<I, E, S, V, F>
-where
-    S: Stream<Item = Result<I, E>>,
-    F: FnMut(I, V) -> (bool, V),
-{
-    inner: std::cell::RefCell<StreamFold<I, E, S, V, F>>,
-}
-
-impl<
-        I,
-        E,
-        S: Stream<Item = Result<I, E>> + std::marker::Unpin + Clone,
-        V: Default,
-        F: FnMut(I, V) -> (bool, V),
-    > Future for StreamCell<I, E, S, V, F>
-{
-    type Output = Result<Option<(V, S)>, E>;
+impl<W, T, V, S: Stream<Item = Result<T, V>>> Future for &StreamFold<S, W, T, V> {
+    type Output = Option<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        //let (mut stream, mut value) = match mem::replace(&mut self.state, StreamFoldState::Empty) {
-        //    StreamFoldState::Empty => panic!("cannot poll Fold twice"),
-        //    StreamFoldState::Full { stream, value } => (stream, value),
-        //};
-
-        let inner = self.inner.get_mut();
-
         loop {
-            match inner.state.stream.as_mut().poll_next(cx)? {
+            match self.stream.borrow_mut().as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
-                    let (done, val) = (inner.func)(item, inner.state.value);
-                    inner.state.value = val;
-                    if done {
-                        let inner_box = Pin::into_inner(inner.state.stream);
-                        //let inner = *inner;
-                        return Poll::Ready(Ok(Some((inner.state.value, *inner_box))));
+                    if (self.function)(&self.state, item) {
+                        return Poll::Ready(Some(()));
+                    } else {
+                        return Poll::Pending;
                     }
+                    //
                 }
-                Poll::Ready(None) => return Poll::Ready(Ok(None)),
+                Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => {
-                    //let stream = Pin::into_inner(self.state.stream);
-                    //self.state = {
-                    //    stream: self.state.stream,
-                    //    value: self.state.value,
-                    //};
                     return Poll::Pending;
                 }
             }

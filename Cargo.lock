@@ -1739,13 +1739,12 @@ dependencies = [
 
 [[package]]
 name = "tokio-tls"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "354b8cd83825b3c20217a9dc174d6a0c67441a2fae5c41bcb1ea6679f6ae0f7c"
+checksum = "9a70f4fcd7b3b24fb194f837560168208f669ca8cb70d0c4b862944452396343"
 dependencies = [
- "futures 0.1.29",
  "native-tls",
- "tokio-io",
+ "tokio 0.2.21",
 ]
 
 [[package]]
