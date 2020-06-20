@@ -28,7 +28,11 @@ use super::protocol::{IrcCommand, Numeric};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
+#[derive(Clone)]
+pub struct IrcServerConnection<S>
+where
+    S: Clone + AsyncRead + AsyncWrite,
+{
     conn: Pin<Box<S>>,
     read_buffer: Vec<u8>,
     inner: Arc<Mutex<IrcServerConnectionInner>>,
@@ -37,7 +41,10 @@ pub struct IrcServerConnection<S: AsyncRead + AsyncWrite> {
     server_name: String,
 }
 
-impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
+impl<S: Clone> IrcServerConnection<S>
+where
+    S: Clone + AsyncWrite + AsyncRead,
+{
     pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
             conn: Box::pin(conn),
@@ -62,7 +69,10 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
             }
         }
 
-        self.poll_write(cx);
+        // ignore the result of the poll
+        match self.poll_write(cx) {
+            _ => (),
+        }
     }
 
     pub fn write_invalid_password(&mut self, nick: &str, cx: &mut Context) {
@@ -246,7 +256,7 @@ impl<S: AsyncRead + AsyncWrite> IrcServerConnection<S> {
     }
 }
 
-impl<S: AsyncRead + AsyncWrite> Stream for IrcServerConnection<S> {
+impl<S: AsyncRead + AsyncWrite + Clone> Stream for IrcServerConnection<S> {
     type Item = Result<IrcCommand, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {

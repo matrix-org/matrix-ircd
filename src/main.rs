@@ -60,7 +60,7 @@ pub mod macros;
 pub mod http;
 pub mod irc;
 pub mod matrix;
-pub mod stream_fold;
+//pub mod stream_fold;
 
 /// A task local context describing the connection (from an IRC client).
 #[derive(Clone)]
