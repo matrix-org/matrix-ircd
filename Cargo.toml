@@ -31,6 +31,7 @@ url = "1.7.2"
 tokio = { version = "0.2.21", features=["full"] }
 # currently added for sanity testing http.rs
 hyper = "0.13.6"
+tokio-native-tls = "0.1.0"
 
 [dependencies.openssl]
 version = "0.10.0"

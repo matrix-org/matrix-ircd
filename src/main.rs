@@ -22,9 +22,6 @@ extern crate slog;
 
 use clap::{App, Arg};
 
-//use futures::stream::Stream;
-//use futures::Future;
-
 use futures3::stream::StreamExt;
 use futures3::{Future, Stream};
 
@@ -35,12 +32,11 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::pin::Pin;
 
 use tokio::net::TcpListener;
-//use tokio_core::net::TcpListener;
-//use tokio_core::reactor::Core;
 
-use native_tls::{Identity, TlsAcceptor};
+use native_tls::{Identity };
 
 //use tasked_futures::TaskExecutor;
 
@@ -149,96 +145,97 @@ async fn main() {
         let pass = matches.value_of("PASSWORD").unwrap();
 
         let pkcs12 = load_pkcs12_from_file(pkcs12_file, pass).expect("error reading pkcs12");
-        let acceptor = TlsAcceptor::builder(pkcs12).build().unwrap();
-        let tokio_acceptor = tokio_tls::TlsAcceptor::from(acceptor);
+        let acceptor = native_tls::TlsAcceptor::builder(pkcs12).build().unwrap();
+        let tokio_acceptor = tokio_native_tls::TlsAcceptor::from(acceptor);
         Some(Arc::new(tokio_acceptor))
     } else {
         None
     };
 
-    let socket = Box::pin(TcpListener::bind(&addr).await.unwrap().incoming());
+    let mut socket = Box::pin(TcpListener::bind(&addr).await.unwrap());
 
     info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
     // This is the main loop where we accept incoming *TCP* connections.
-    //while let Some(Ok(tcp_stream)) = socket.next().await {
-    //    //.for_each(move |(socket, addr)| {
-    //    let addr = if let Ok(addr) = tcp_stream.peer_addr() {
-    //        addr
-    //    } else {
-    //        // TODO: log this
-    //        continue;
-    //    };
+    while let Some(Ok(tcp_stream)) = socket.next().await {
+        let addr = if let Ok(addr) = tcp_stream.peer_addr() {
+            addr
+        } else {
+            // TODO: log this
+            continue;
+        };
 
-    //    let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
+        let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
-    //    let ctx = ConnectionContext {
-    //        logger: Arc::new(peer_log),
-    //        peer_addr: addr,
-    //    };
+        let ctx = ConnectionContext {
+            logger: Arc::new(peer_log),
+            peer_addr: addr,
+        };
 
-    //    //let new_handle = handle.clone();
+        //let new_handle = handle.clone();
 
-    //    let cloned_ctx = ctx.clone();
+        let cloned_ctx = ctx.clone();
 
-    //    // Set up a new task for the connection. We do this early so that the logging is correct.
-    //    let setup_future = futures3::future::lazy(move |cx: &mut Context| {
-    //        debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
+        // Set up a new task for the connection. We do this early so that the logging is correct.
+        let setup_future = futures3::future::lazy(move |cx: &mut Context| {
+            debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
 
-    //        CONTEXT.with(|m| {
-    //            *m.borrow_mut() = Some(cloned_ctx);
-    //        });
+            CONTEXT.with(|m| {
+                *m.borrow_mut() = Some(cloned_ctx);
+            });
 
-    //        Ok(socket)
-    //    });
+        });
 
-    //    //let setup_future = Box::pin(setup_future);
+        // TODO: This should be configurable. Maybe use the matrix HS server_name?
+        let irc_server_name = "localhost".into();
 
-    //    // TODO: This should be configurable. Maybe use the matrix HS server_name?
-    //    let irc_server_name = "localhost".into();
+        // We need to clone here as the borrow checker doesn't like us taking ownership through
+        // two levels of closures (understandably)
+        let cloned_url = matrix_url.clone();
 
-    //    // We need to clone here as the borrow checker doesn't like us taking ownership through
-    //    // two levels of closures (understandably)
-    //    let cloned_url = matrix_url.clone();
+        if let Some(acceptor) = tls_acceptor.clone() {
+            // Do the TLS handshake and then set up the bridge
+            let spawn_fut = futures3::future::lazy(move |cx: &mut Context| async move {
 
-    //    if let Some(acceptor) = tls_acceptor.clone() {
-    //        // Do the TLS handshake and then set up the bridge
-    //        let spawn_fut = futures3::future::lazy(move |cx: &mut Context| async {
+                let socket = setup_future.await;
+                let tls_socket = acceptor.accept(tcp_stream).await.map_err(|err| {
+                    task_warn!("TLS handshake failed"; "error" => format!("{}", err));
+                    io::Error::new(io::ErrorKind::Other, err);
+                }).unwrap();
 
-    //            //let future = setup_future.await;
-    //            let socket= setup_future.await.unwrap();
-    //            //let tls_socket = acceptor.accept(socket).await.map_err(|err| {
-    //            //    task_warn!("TLS handshake failed"; "error" => format!("{}", err));
-    //            //    io::Error::new(io::ErrorKind::Other, err);
-    //            //}).unwrap();
+                let bridge = bridge::Bridge::create(
+                    cloned_url, 
+                    tls_socket, 
+                    irc_server_name, 
+                    ctx)
+                    .await;
+                          //.map_err(
+                          //    //|err: Box<dyn futures3::future::Future<Output=Result<_, bridge::Error>>>| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
+                          //    |err| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
+                          //);
 
-    //            //let bridge = bridge::Bridge::create(cloned_url, socket, irc_server_name, ctx).await;
-    //                        //.map_err(
-    //                        //    //|err: Box<dyn futures3::future::Future<Output=Result<_, bridge::Error>>>| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
-    //                        //    |err| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
-    //                        //);
+                task_info!("Finished");
 
-    //            task_info!("Finished");
+            });
 
-    //        });
+            // We spawn the future off, otherwise we'd block the stream of incoming connections.
+            // This is what causes the future to be in its own chain.
+            //handle.spawn(future);
 
-    //        // We spawn the future off, otherwise we'd block the stream of incoming connections.
-    //        // This is what causes the future to be in its own chain.
-    //        //handle.spawn(future);
-    //        tokio::spawn(spawn_fut);
-    //    } else {
-    //       // // Same as above except with less TLS.
-    //       // let future = setup_future
-    //       //     .and_then(move |socket| {
-    //       //         bridge::Bridge::create(cloned_url, socket, irc_server_name, ctx)
-    //       //     })
-    //       //     .map(|bridge| bridge.into_future())
-    //       //     .flatten()
-    //       //     .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
+            tokio::spawn(spawn_fut);
+        } else {
+           // // Same as above except with less TLS.
+           // let future = setup_future
+           //     .and_then(move |socket| {
+           //         bridge::Bridge::create(cloned_url, socket, irc_server_name, ctx)
+           //     })
+           //     .map(|bridge| bridge.into_future())
+           //     .flatten()
+           //     .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
 
-    //       // //handle.spawn(future);
-    //    };
+           // //handle.spawn(future);
+        };
 
-    //}
-    ////l.run(done).unwrap();
+    }
+    //l.run(done).unwrap();
 }

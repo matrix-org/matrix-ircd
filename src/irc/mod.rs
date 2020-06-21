@@ -32,16 +32,17 @@ use futures3::stream::{Stream, StreamExt};
 use futures3::task::Poll;
 
 use std::boxed::Box;
+use std::cell::RefCell;
 use std::io;
 use std::pin::Pin;
-use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use slog::{debug, info, trace};
 
 use std::task::Context;
 
-pub struct IrcUserConnection<S: AsyncRead + AsyncWrite > {
+pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: Pin<Box<transport::IrcServerConnection<S>>>,
     pub user: String,
     pub nick: String,
@@ -54,10 +55,10 @@ pub struct IrcUserConnection<S: AsyncRead + AsyncWrite > {
 
 #[derive(Debug, Clone, Default)]
 struct UserNickBuilder {
-     nick: Option<String>,
-     user: Option<String>,
-     real_name: Option<String>,
-     password: Option<String>,
+    nick: Option<String>,
+    user: Option<String>,
+    real_name: Option<String>,
+    password: Option<String>,
 }
 
 impl UserNickBuilder {
@@ -78,6 +79,30 @@ impl UserNickBuilder {
     }
 }
 
+impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNickBuilder {
+    fn state_update(&mut self, new_item: Result<IrcCommand, io::Error>) -> bool {
+            let new_item = match new_item{
+                Ok(good_update) => good_update,
+                Err(_) => return false,
+            };
+
+
+            match new_item {
+                IrcCommand::Nick { nick } => self.nick = Some(nick),
+                IrcCommand::User { user, real_name } => {
+                    self.user = Some(user);
+                    self.real_name = Some(real_name);
+                }
+                IrcCommand::Pass { password } => self.password = Some(password),
+                c => {
+                    //debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
+                }
+            }
+            self.is_complete()
+    }
+
+}
+
 #[derive(Debug, Clone, Default)]
 struct UserNick {
     nick: String,
@@ -88,7 +113,7 @@ struct UserNick {
 
 impl<S> IrcUserConnection<S>
 where
-    S: AsyncRead + AsyncWrite + Clone + 'static,
+    S: AsyncRead + AsyncWrite + 'static,
 {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
     pub async fn await_login(
@@ -101,39 +126,16 @@ where
             transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
 
         let ctx_clone = ctx.clone();
-        
-        let function = move |state: &RefCell<UserNickBuilder>, update: Result<IrcCommand, io::Error>| {
-            let update = match update {
-                Ok(good_update) => good_update,
-                Err(_) => return false
-            };
 
-            let mut state = state.try_borrow_mut().expect("");
-
-            match update {
-                    IrcCommand::Nick { nick } => state.nick = Some(nick),
-                    IrcCommand::User { user, real_name } => {
-                        state.user = Some(user);
-                        state.real_name = Some(real_name);
-                    }
-                    IrcCommand::Pass { password } => state.password = Some(password),
-                    c => {
-                        debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
-                    }
-            }
-            state.is_complete()
-        };
-
-        //let irc_conn = Rc::new(irc_conn);
-        //let user_nick = Rc::new(RefCell::new(UserNickBuilder::default()));
-
-        let folder = crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::default(), Box::new(function));
+        let folder = crate::stream_fold::StreamFold::new(
+            irc_conn,
+            UserNickBuilder::default(),
+        );
         (&folder).await;
 
         let (irc_conn, user_nick) = folder.into_parts();
 
         let irc_user = user_nick.to_user_nick();
-
 
         info!(ctx_clone.logger, "got nick and user");
         let user_prefix = format!("{}!{}@{}", &irc_user.nick, &irc_user.user, &server_name);
@@ -156,7 +158,6 @@ where
         );
 
         Ok(user_conn)
-        
     }
 
     pub fn nick_exists(&self, nick: &str) -> bool {

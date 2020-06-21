@@ -20,54 +20,60 @@ use std::boxed::Box;
 use std::cell::RefCell;
 use std::mem;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::pin::Pin;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[must_use = "futures do nothing unless polled"]
 pub struct StreamFold<S, W, T, V>
 where
     S: Stream<Item = Result<T, V>>,
+    W: StateUpdate<Result<T, V>>,
 {
-    stream: RefCell<Pin<Box<S>>>,
-    // function takes in the accumulator (state) for the first argument and
-    // the output from the stream as the second argument
-    // returns true if it is finished accumulating and we should complete the future
-    // In the future it might just return Poll.
-    function: Box<dyn Fn(&RefCell<W>, Result<T, V>) -> bool>,
+    stream: Mutex<Pin<Box<S>>>,
+
     // The variable that is being updated with every new value from self.stream
-    state: RefCell<W>,
+    state: Mutex<W>,
 }
 
-impl<W, T, V, S: Stream<Item = Result<T, V>>> StreamFold<S, W, T, V> {
-    pub fn new(
-        stream: S,
-        state: W,
-        function: Box<dyn Fn(&RefCell<W>, Result<T, V>) -> bool>,
-    ) -> StreamFold<S, W, T, V> {
+impl<W, T, V, S> StreamFold<S, W, T, V>
+where
+    W: std::fmt::Debug + StateUpdate<Result<T, V>>,
+    S: Stream<Item = Result<T, V>>,
+{
+    pub fn new(stream: S, state: W) -> StreamFold<S, W, T, V> {
         StreamFold {
-            state: RefCell::new(state),
-            stream: RefCell::new(Box::pin(stream)),
-            function,
+            state: Mutex::new(state),
+            stream: Mutex::new(Box::pin(stream)),
         }
     }
 
     pub fn into_parts(self) -> (Pin<Box<S>>, W) {
-        (self.stream.into_inner(), self.state.into_inner())
+        (
+            self.stream.into_inner().unwrap(),
+            self.state.into_inner().unwrap(),
+        )
     }
 }
 
-impl<W, T, V, S: Stream<Item = Result<T, V>>> Future for &StreamFold<S, W, T, V> {
+impl<W, T, V, S> Future for &StreamFold<S, W, T, V>
+where
+    W: StateUpdate<Result<T, V>>,
+    S: Stream<Item = Result<T, V>>,
+{
     type Output = Option<()>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
-            match self.stream.borrow_mut().as_mut().poll_next(cx) {
+            match self.stream.lock().unwrap().as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
-                    if (self.function)(&self.state, item) {
+                    if self.state.lock().unwrap().state_update(item) {
                         return Poll::Ready(Some(()));
                     } else {
                         return Poll::Pending;
                     }
-                    //
                 }
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => {
@@ -76,4 +82,8 @@ impl<W, T, V, S: Stream<Item = Result<T, V>>> Future for &StreamFold<S, W, T, V>
             }
         }
     }
+}
+
+pub trait StateUpdate<Z> {
+    fn state_update(&mut self, new_item: Z) -> bool;
 }

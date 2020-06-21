@@ -688,6 +688,7 @@ dependencies = [
  "tokio-core",
  "tokio-dns-unofficial",
  "tokio-io",
+ "tokio-native-tls",
  "tokio-proto",
  "tokio-timer 0.1.2",
  "tokio-tls",
@@ -1627,6 +1628,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio-native-tls"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd608593a919a8e05a7d1fc6df885e40f6a88d3a70a3a7eff23ff27964eda069"
+dependencies = [
+ "native-tls",
+ "tokio 0.2.21",
 ]
 
 [[package]]

@@ -60,7 +60,7 @@ pub struct Bridge<IS: AsyncRead + AsyncWrite + 'static> {
     joining_map: BTreeMap<String, String>,
 }
 
-impl<IS: AsyncRead + AsyncWrite + Clone + 'static> Bridge<IS> {
+impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
     /// HS with the given user name and password.
     ///
@@ -288,7 +288,7 @@ impl<IS: AsyncRead + AsyncWrite + Clone + 'static> Bridge<IS> {
     }
 }
 
-impl<IS: AsyncRead + AsyncWrite > TaskExecutor for Bridge<IS> {
+impl<IS: AsyncRead + AsyncWrite> TaskExecutor for Bridge<IS> {
     type Error = io::Error;
 
     fn task_executor_mut(&mut self) -> &mut TaskExecutorQueue<Self, io::Error> {
@@ -338,7 +338,7 @@ struct MappingStore {
 }
 
 impl MappingStore {
-    pub fn insert_nick<S: AsyncRead + AsyncWrite + Clone + 'static>(
+    pub fn insert_nick<S: AsyncRead + AsyncWrite + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         nick: String,
@@ -359,7 +359,7 @@ impl MappingStore {
         self.room_id_to_channel.get(room_id)
     }
 
-    pub fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + Clone + 'static>(
+    pub fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         room: &MatrixRoom,
@@ -439,7 +439,7 @@ impl MappingStore {
         (channel, true)
     }
 
-    pub fn create_or_get_nick_from_matrix<S: AsyncRead + AsyncWrite + Clone + 'static>(
+    pub fn create_or_get_nick_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         user_id: &str,
