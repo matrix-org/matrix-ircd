@@ -20,19 +20,8 @@
 #[macro_use]
 extern crate slog;
 
-use clap;
-use lazy_static;
-use native_tls;
-use slog_async;
-use slog_term;
-use tasked_futures;
-use tokio_core;
-use tokio_tls;
-use url;
-
 use clap::{App, Arg};
 
-use futures;
 use futures::stream::Stream;
 use futures::Future;
 
