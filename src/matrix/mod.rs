@@ -315,7 +315,7 @@ quick_error! {
 impl Stream for MatrixClient {
     type Item = Result<protocol::SyncResponse, Error>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         task_trace!("Polled matrix client");
         self.poll_sync(cx)
     }

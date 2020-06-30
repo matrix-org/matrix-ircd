@@ -21,6 +21,7 @@ use crate::ConnectionContext;
 use futures3::compat::Compat;
 use futures3::future::TryFutureExt;
 use futures3::prelude::{Future, Stream};
+use futures3::stream::StreamExt;
 use futures3::task::Poll;
 
 use crate::irc::{IrcCommand, IrcUserConnection};
@@ -35,6 +36,7 @@ use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::io;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Context;
 
 use serde_json::Value;
@@ -42,8 +44,6 @@ use serde_json::Value;
 //use tokio_core::reactor::Handle;
 use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
-
-use tasked_futures::{FutureTaskedExt, TaskExecutor, TaskExecutorQueue, TaskedFuture};
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -56,11 +56,10 @@ pub struct Bridge<IS: AsyncRead + AsyncWrite + 'static> {
     closed: bool,
     mappings: MappingStore,
     is_first_sync: bool,
-    executor_queue: TaskExecutorQueue<Bridge<IS>, io::Error>,
     joining_map: BTreeMap<String, String>,
 }
 
-impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
+impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
     /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
     /// HS with the given user name and password.
     ///
@@ -84,7 +83,6 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
             closed: false,
             mappings: MappingStore::default(),
             is_first_sync: true,
-            executor_queue: TaskExecutorQueue::default(),
             joining_map: BTreeMap::new(),
         };
 
@@ -98,13 +96,10 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         let own_user_id = matrix_client.get_user_id().into();
         mappings.insert_nick(irc_conn, own_nick, own_user_id);
 
-        // TODO: fix this bridge usage after removing tasked futures
-        // bridge.spawn_fn(|bridge| bridge.poll_irc(cx));
-        // bridge.spawn_fn(|bridge| bridge.poll_matrix(cx));
         Ok(bridge)
     }
 
-    async fn handle_irc_cmd(&mut self, line: IrcCommand, cx: &mut Context<'_>) {
+    async fn handle_irc_cmd(&mut self, line: IrcCommand) {
         debug!(self.ctx.logger, "Received IRC line"; "command" => line.command());
 
         match line {
@@ -144,7 +139,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                         // We respond to the join with a redirect!
                         task_trace!("Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
                         self.irc_conn
-                            .write_redirect_join(&channel, mapped_channel, cx);
+                            .write_redirect_join(&channel, mapped_channel)
+                            .await;
                     }
                 } else {
                     task_trace!("Waiting for room to come down sync"; "room_id" => room_id.clone());
@@ -158,18 +154,18 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
     }
 
-    fn handle_sync_response(&mut self, sync_response: SyncResponse, cx: &mut Context) {
+    async fn handle_sync_response(&mut self, sync_response: SyncResponse) {
         trace!(self.ctx.logger, "Received sync response"; "batch" => sync_response.next_batch);
 
         if self.is_first_sync {
             info!(self.ctx.logger, "Received initial sync response");
 
-            self.irc_conn.welcome(cx);
-            self.irc_conn.send_ping("HELLO", cx);
+            self.irc_conn.welcome().await;
+            self.irc_conn.send_ping("HELLO").await;
         }
 
         for (room_id, sync) in &sync_response.rooms.join {
-            self.handle_room_sync(room_id, sync, cx);
+            self.handle_room_sync(room_id, sync).await;
         }
 
         if self.is_first_sync {
@@ -178,10 +174,11 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
     }
 
-    fn handle_room_sync(&mut self, room_id: &str, sync: &JoinedRoomSyncResponse, cx: &mut Context) {
+    async fn handle_room_sync(&mut self, room_id: &str, sync: &JoinedRoomSyncResponse) {
         let (channel, new) = if let Some(room) = self.matrix_client.get_room(room_id) {
             self.mappings
-                .create_or_get_channel_name_from_matrix(&mut self.irc_conn, room, cx)
+                .create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)
+                .await
         } else {
             warn!(self.ctx.logger, "Got room matrix doesn't know about"; "room_id" => room_id);
             return;
@@ -190,7 +187,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         if let Some(attempt_channel) = self.joining_map.remove(room_id) {
             if &attempt_channel != &channel {
                 self.irc_conn
-                    .write_redirect_join(&attempt_channel, &channel, cx);
+                    .write_redirect_join(&attempt_channel, &channel)
+                    .await;
             }
         }
 
@@ -218,26 +216,35 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                     }
                 };
                 match msgtype {
-                    "m.text" => self.irc_conn.send_message(&channel, sender_nick, body, cx),
-                    "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body, cx),
+                    "m.text" => {
+                        self.irc_conn
+                            .send_message(&channel, sender_nick, body)
+                            .await
+                    }
+                    "m.emote" => self.irc_conn.send_action(&channel, sender_nick, body).await,
                     "m.image" | "m.file" | "m.video" | "m.audio" => {
                         let url = ev.content.get("url").and_then(Value::as_str);
                         match url {
-                            Some(url) => self.irc_conn.send_message(
-                                &channel,
-                                sender_nick,
-                                self.matrix_client.media_url(&url).as_str(),
-                                cx,
-                            ),
+                            Some(url) => {
+                                self.irc_conn
+                                    .send_message(
+                                        &channel,
+                                        sender_nick,
+                                        self.matrix_client.media_url(&url).as_str(),
+                                    )
+                                    .await
+                            }
                             None => {
                                 warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
-                                                                                            "message" => format!("{:?}", ev))
+                                                                                          "message" => format!("{:?}", ev));
                             }
                         }
                     }
                     _ => {
                         warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
-                        self.irc_conn.send_message(&channel, sender_nick, body, cx);
+                        self.irc_conn
+                            .send_message(&channel, sender_nick, body)
+                            .await;
                     }
                 }
             }
@@ -248,7 +255,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
     }
 
-    fn poll_irc(&mut self, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+    pub async fn poll_irc(&mut self) -> Poll<Result<(), io::Error>> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
         if self.is_first_sync {
@@ -256,43 +263,28 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
         }
 
         loop {
-            let poll_response = match self.irc_conn.as_mut().poll(cx)? {
+            let poll_response = match self.irc_conn.as_mut().poll().await? {
                 Poll::Ready(x) => x,
                 Poll::Pending => return Poll::Pending,
             };
 
             if let Some(line) = poll_response {
-                self.handle_irc_cmd(line, cx);
+                self.handle_irc_cmd(line).await;
             } else {
                 self.closed = true;
-                self.stop();
+                // TODO: figure out how to replicate this behavior with the task
+                //self.stop();
                 return Poll::Ready(Ok(()));
             }
         }
     }
 
-    fn poll_matrix(&mut self, cx: &mut Context) -> Poll<Result<(), Error>> {
-        loop {
-            let poll_response = match self.matrix_client.as_mut().poll_next(cx)? {
-                Poll::Ready(r) => r,
-                Poll::Pending => return Poll::Pending,
-            };
-            if let Some(sync_response) = poll_response {
-                self.handle_sync_response(sync_response, cx);
-            } else {
-                self.closed = true;
-                self.stop();
-                return Poll::Ready(Ok(()));
-            }
+    pub async fn poll_matrix(&mut self) -> Result<(), Error> {
+        while let Some(response) = self.matrix_client.as_mut().next().await {
+            let response = response?;
+            self.handle_sync_response(response).await;
         }
-    }
-}
-
-impl<IS: AsyncRead + AsyncWrite> TaskExecutor for Bridge<IS> {
-    type Error = io::Error;
-
-    fn task_executor_mut(&mut self) -> &mut TaskExecutorQueue<Self, io::Error> {
-        &mut self.executor_queue
+        Ok(())
     }
 }
 
@@ -359,11 +351,10 @@ impl MappingStore {
         self.room_id_to_channel.get(room_id)
     }
 
-    pub fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
+    pub async fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         room: &MatrixRoom,
-        cx: &mut Context,
     ) -> (String, bool) {
         let room_id = room.get_room_id();
 
@@ -426,15 +417,16 @@ impl MappingStore {
             })
             .collect();
 
-        irc_server.add_channel(
-            channel.clone(),
-            room.get_topic().unwrap_or("").into(),
-            &members
-                .iter()
-                .map(|&(ref nick, op)| (nick, op))
-                .collect::<Vec<_>>()[..], // FIXME: To get around lifetimes
-            cx,
-        );
+        irc_server
+            .add_channel(
+                channel.clone(),
+                room.get_topic().unwrap_or("").into(),
+                &members
+                    .iter()
+                    .map(|&(ref nick, op)| (nick, op))
+                    .collect::<Vec<_>>()[..], // FIXME: To get around lifetimes
+            )
+            .await;
 
         (channel, true)
     }

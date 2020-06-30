@@ -81,26 +81,24 @@ impl UserNickBuilder {
 
 impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNickBuilder {
     fn state_update(&mut self, new_item: Result<IrcCommand, io::Error>) -> bool {
-            let new_item = match new_item{
-                Ok(good_update) => good_update,
-                Err(_) => return false,
-            };
+        let new_item = match new_item {
+            Ok(good_update) => good_update,
+            Err(_) => return false,
+        };
 
-
-            match new_item {
-                IrcCommand::Nick { nick } => self.nick = Some(nick),
-                IrcCommand::User { user, real_name } => {
-                    self.user = Some(user);
-                    self.real_name = Some(real_name);
-                }
-                IrcCommand::Pass { password } => self.password = Some(password),
-                c => {
-                    //debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
-                }
+        match new_item {
+            IrcCommand::Nick { nick } => self.nick = Some(nick),
+            IrcCommand::User { user, real_name } => {
+                self.user = Some(user);
+                self.real_name = Some(real_name);
             }
-            self.is_complete()
+            IrcCommand::Pass { password } => self.password = Some(password),
+            c => {
+                //debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
+            }
+        }
+        self.is_complete()
     }
-
 }
 
 #[derive(Debug, Clone, Default)]
@@ -127,10 +125,7 @@ where
 
         let ctx_clone = ctx.clone();
 
-        let folder = crate::stream_fold::StreamFold::new(
-            irc_conn,
-            UserNickBuilder::default(),
-        );
+        let folder = crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::default());
         (&folder).await;
 
         let (irc_conn, user_nick) = folder.into_parts();
@@ -172,18 +167,12 @@ where
         self.server_model.create_user(nick, user);
     }
 
-    pub fn add_channel(
-        &mut self,
-        name: String,
-        topic: String,
-        members: &[(&String, bool)],
-        cx: &mut Context,
-    ) {
+    pub async fn add_channel(&mut self, name: String, topic: String, members: &[(&String, bool)]) {
         self.server_model.add_channel(name.clone(), topic, members);
-        self.attempt_to_write_join_response(&name, cx);
+        self.attempt_to_write_join_response(&name).await;
     }
 
-    fn attempt_to_write_join_response(&mut self, name: &str, cx: &mut Context) -> bool {
+    async fn attempt_to_write_join_response(&mut self, name: &str) -> bool {
         let IrcUserConnection {
             ref mut server_model,
             ref mut conn,
@@ -198,70 +187,72 @@ where
                 .iter()
                 .map(|&(ref user, ref entry)| (&user.nick, entry.operator))
                 .collect();
-            conn.write_join(&self.user_prefix, &channel.name, cx);
-            conn.write_topic(&self.server_name, &channel.name, &channel.topic, cx);
-            conn.write_names(&self.nick, name, &names[..], cx);
+            conn.write_join(&self.user_prefix, &channel.name).await;
+            conn.write_topic(&self.server_name, &channel.name, &channel.topic)
+                .await;
+            conn.write_names(&self.nick, name, &names[..]).await;
             conn.write_numeric(
                 Numeric::RplChannelmodeis,
                 &self.nick,
                 &format!("{} +n", &channel.name),
-                cx,
-            );
+            )
+            .await;
             true
         } else {
             false
         }
     }
 
-    pub fn send_message(&mut self, channel: &str, sender: &str, body: &str, cx: &mut Context) {
+    pub async fn send_message(&mut self, channel: &str, sender: &str, body: &str) {
         for line in body.split('\n') {
             self.conn
-                .write_line(&format!(":{} PRIVMSG {} :{}", sender, channel, line), cx);
+                .write_line(&format!(":{} PRIVMSG {} :{}", sender, channel, line))
+                .await;
         }
     }
 
-    pub fn send_action(&mut self, channel: &str, sender: &str, body: &str, cx: &mut Context) {
+    pub async fn send_action(&mut self, channel: &str, sender: &str, body: &str) {
         for line in body.split('\n') {
-            self.conn.write_line(
-                &format!(
+            self.conn
+                .write_line(&format!(
                     ":{} PRIVMSG {} :\u{0001}ACTION {}\u{0001}",
                     sender, channel, line
-                ),
-                cx,
-            );
+                ))
+                .await;
         }
     }
 
-    pub fn write_invalid_password(&mut self, cx: &mut Context) {
-        self.conn.write_invalid_password(&self.nick, cx);
+    pub async fn write_invalid_password(&mut self) {
+        self.conn.write_invalid_password(&self.nick).await;
     }
 
-    pub fn write_redirect_join(&mut self, old_channel: &str, new_channel: &str, cx: &mut Context) {
-        self.conn.write_numeric(
-            Numeric::RplForwardedChannel,
-            &self.nick,
-            &format!(
-                "{} {} :Forwarding to another channel",
-                old_channel, new_channel,
-            ),
-            cx,
-        );
+    pub async fn write_redirect_join(&mut self, old_channel: &str, new_channel: &str) {
+        self.conn
+            .write_numeric(
+                Numeric::RplForwardedChannel,
+                &self.nick,
+                &format!(
+                    "{} {} :Forwarding to another channel",
+                    old_channel, new_channel,
+                ),
+            )
+            .await;
     }
 
-    pub fn welcome(&mut self, cx: &mut Context) {
-        self.conn.welcome(&self.nick, cx);
+    pub async fn welcome(&mut self) {
+        self.conn.welcome(&self.nick).await;
     }
 
-    pub fn send_ping(&mut self, data: &str, cx: &mut Context) {
+    pub async fn send_ping(&mut self, data: &str) {
         let line = format!("PING {}", data);
-        self.write_line(&line, cx);
+        self.write_line(&line).await;
     }
 
-    pub fn write_line(&mut self, line: &str, cx: &mut Context) {
-        self.conn.write_line(line, cx);
+    pub async fn write_line(&mut self, line: &str) {
+        self.conn.write_line(line).await;
     }
 
-    fn handle_who_channel_cmd(&mut self, channel: String, cx: &mut Context) {
+    async fn handle_who_channel_cmd(&mut self, channel: String) {
         let IrcUserConnection {
             ref mut server_model,
             ref mut conn,
@@ -277,58 +268,56 @@ where
                         "{} {} {} {} {} H :0 {}",
                         &channel, &user.nick, &user.mask, &self.server_name, &user.user, &user.user,
                     ),
-                    cx,
-                );
+                )
+                .await;
             }
             conn.write_numeric(
                 Numeric::RplEndofwho,
                 &self.nick,
                 &format!("{} :End of /WHO", &channel),
-                cx,
-            );
+            )
+            .await;
         } else {
             // TODO: No such room
         }
     }
 
-    fn handle_mode_channel_cmd(&mut self, channel: String, cx: &mut Context) {
-        self.conn.write_numeric(
-            Numeric::RplChannelmodeis,
-            &self.nick,
-            &format!("{} +n", &channel),
-            cx,
-        );
+    async fn handle_mode_channel_cmd(&mut self, channel: String) {
+        self.conn
+            .write_numeric(
+                Numeric::RplChannelmodeis,
+                &self.nick,
+                &format!("{} +n", &channel),
+            )
+            .await;
     }
 
-    pub fn poll(&mut self, cx: &mut Context) -> Poll<Result<Option<IrcCommand>, io::Error>> {
+    pub async fn poll(&mut self) -> Poll<Result<Option<IrcCommand>, io::Error>> {
         loop {
-            let next = match self.conn.as_mut().poll_next(cx)? {
-                Poll::Ready(optional_next) => optional_next,
-                Poll::Pending => return Poll::Pending,
-            };
+            let next = self.conn.as_mut().next().await;
 
             match next {
-                Some(cmd) => match cmd {
+                Some(Ok(cmd)) => match cmd {
                     IrcCommand::Ping { data } => {
                         let line = format!(":{} PONG {}", &self.server_name, data);
-                        self.write_line(&line, cx);
+                        self.write_line(&line).await;
                         continue;
                     }
                     IrcCommand::Join { channel } => {
-                        if !self.attempt_to_write_join_response(&channel, cx) {
+                        if !self.attempt_to_write_join_response(&channel).await {
                             return Poll::Ready(Ok(Some(IrcCommand::Join { channel })));
                         }
                     }
                     IrcCommand::Who { matches } => {
                         if matches.starts_with('#') {
-                            self.handle_who_channel_cmd(matches, cx);
+                            self.handle_who_channel_cmd(matches).await;
                         } else {
                             // TODO
                         }
                     }
                     IrcCommand::Mode { target, mask } => {
                         if target.starts_with('#') && mask.is_none() {
-                            self.handle_mode_channel_cmd(target, cx);
+                            self.handle_mode_channel_cmd(target).await;
                         } else {
                             // TODO
                         }
@@ -336,6 +325,7 @@ where
                     IrcCommand::Pong { .. } => {}
                     c => return Poll::Ready(Ok(Some(c))),
                 },
+                Some(Err(e)) => return Poll::Ready(Err(e)),
                 None => return Poll::Ready(Ok(None)),
             }
         }

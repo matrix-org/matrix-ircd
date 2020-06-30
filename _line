@@ -56,7 +56,7 @@ where
         }
     }
 
-    pub async fn write_line(&mut self, line: &str) {
+    pub async fn write_line(&mut self, line: &str, cx: &mut Context<'_>) {
         {
             let mut inner = self.inner.lock().unwrap();
 
@@ -70,20 +70,29 @@ where
         }
 
         // ignore the result of the poll
-        self.write().await.ok();
+        self.poll_write_2().await;
     }
 
-    pub async fn write_invalid_password(&mut self, nick: &str) {
-        self.write_numeric(Numeric::ErrPasswdmismatch, nick, ":Invalid password")
-            .await;
+    pub fn write_invalid_password(&mut self, nick: &str, cx: &mut Context) {
+        self.write_numeric(Numeric::ErrPasswdmismatch, nick, ":Invalid password", cx);
     }
 
-    pub async fn write_password_required(&mut self, nick: &str) {
-        self.write_numeric(Numeric::ErrNeedmoreparams, nick, "PASS :Password required")
-            .await;
+    pub fn write_password_required(&mut self, nick: &str, cx: &mut Context) {
+        self.write_numeric(
+            Numeric::ErrNeedmoreparams,
+            nick,
+            "PASS :Password required",
+            cx,
+        );
     }
 
-    pub async fn write_numeric(&mut self, numeric: Numeric, nick: &str, rest_of_line: &str) {
+    pub fn write_numeric(
+        &mut self,
+        numeric: Numeric,
+        nick: &str,
+        rest_of_line: &str,
+        cx: &mut Context,
+    ) {
         let line = format!(
             ":{} {} {} {}",
             &self.server_name,
@@ -91,53 +100,65 @@ where
             nick,
             rest_of_line
         );
-        self.write_line(&line).await;
+        self.write_line(&line, cx);
     }
 
-    pub async fn welcome(&mut self, nick: &str) {
+    pub fn welcome(&mut self, nick: &str, cx: &mut Context) {
         self.write_numeric(
             Numeric::RplWelcome,
             nick,
             ":Welcome to the Matrix Internet Relay Network",
-        )
-        .await;
+            cx,
+        );
 
         let motd_start = format!(":- {} Message of the day -", self.server_name);
-        self.write_numeric(Numeric::RplMotdstart, nick, &motd_start)
-            .await;
-        self.write_numeric(Numeric::RplMotd, nick, ":-").await;
-        self.write_numeric(Numeric::RplMotd, nick, ":- This is a bridge into Matrix")
-            .await;
-        self.write_numeric(Numeric::RplMotd, nick, ":-").await;
-        self.write_numeric(Numeric::RplEndofmotd, nick, ":End of MOTD")
-            .await;
+        self.write_numeric(Numeric::RplMotdstart, nick, &motd_start, cx);
+        self.write_numeric(Numeric::RplMotd, nick, ":-", cx);
+        self.write_numeric(
+            Numeric::RplMotd,
+            nick,
+            ":- This is a bridge into Matrix",
+            cx,
+        );
+        self.write_numeric(Numeric::RplMotd, nick, ":-", cx);
+        self.write_numeric(Numeric::RplEndofmotd, nick, ":End of MOTD", cx);
     }
 
-    pub async fn write_join(&mut self, nick: &str, channel: &str) {
+    pub fn write_join(&mut self, nick: &str, channel: &str, cx: &mut Context) {
         let line = format!(":{} JOIN {}", nick, channel);
-        self.write_line(&line).await;
+        self.write_line(&line, cx);
     }
 
-    pub async fn write_topic(&mut self, nick: &str, channel: &str, topic: &str) {
-        self.write_numeric(Numeric::RplTopic, nick, &format!("{} :{}", channel, topic))
-            .await;
+    pub fn write_topic(&mut self, nick: &str, channel: &str, topic: &str, cx: &mut Context) {
+        self.write_numeric(
+            Numeric::RplTopic,
+            nick,
+            &format!("{} :{}", channel, topic),
+            cx,
+        );
     }
 
-    pub async fn write_names(&mut self, nick: &str, channel: &str, names: &[(&String, bool)]) {
+    pub fn write_names(
+        &mut self,
+        nick: &str,
+        channel: &str,
+        names: &[(&String, bool)],
+        cx: &mut Context,
+    ) {
         for iter in names.chunks(10) {
             let mut line = format!("@ {} :", channel);
             for &(nick, op) in iter {
                 write!(line, "{}{} ", if op { "@" } else { "" }, &nick).unwrap();
             }
             let line = line.trim();
-            self.write_numeric(Numeric::RplNamreply, nick, &line).await;
+            self.write_numeric(Numeric::RplNamreply, nick, &line, cx);
         }
         self.write_numeric(
             Numeric::RplEndofnames,
             nick,
             &format!("{} :End of /NAMES", channel),
-        )
-        .await;
+            cx,
+        );
     }
 
     fn poll_read(&mut self, cx: &mut Context) -> Poll<Result<IrcCommand, io::Error>> {
@@ -232,7 +253,7 @@ where
         }
     }
 
-    async fn write(&mut self) -> Result<(), io::Error> {
+    async fn poll_write_2(&mut self) -> Result<(), io::Error> {
         loop {
             let mut inner = self.inner.lock().unwrap();
 
