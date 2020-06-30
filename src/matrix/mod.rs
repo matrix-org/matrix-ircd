@@ -16,8 +16,8 @@
 //!
 //! It knows nothing about IRC.
 
-use futures3::prelude::Stream;
-use futures3::task::Poll;
+use futures::prelude::Stream;
+use futures::task::Poll;
 
 use std::boxed::Box;
 use std::collections::BTreeMap;
@@ -85,12 +85,12 @@ impl MatrixClient {
         user: String,
         password: String,
     ) -> Result<MatrixClient, Error> {
-        let host = base_url
+        let _host = base_url
             .host_str()
             .expect("expected host in base_url")
             .to_string();
-        let port = base_url.port_or_known_default().unwrap();
-        let tls = match base_url.scheme() {
+        let _port = base_url.port_or_known_default().unwrap();
+        let _tls = match base_url.scheme() {
             "http" => false,
             "https" => true,
             _ => panic!("Unrecognized scheme {}", base_url.scheme()),

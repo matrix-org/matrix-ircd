@@ -22,25 +22,19 @@ pub mod transport;
 
 pub use self::protocol::{Command, IrcCommand, IrcLine, Numeric};
 
-//use crate::stream_fold::StreamFold;
 use crate::ConnectionContext;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use futures3::future::{Future, FutureExt};
-use futures3::stream::{Stream, StreamExt};
-use futures3::task::Poll;
+use futures::stream::StreamExt;
+use futures::task::Poll;
 
 use std::boxed::Box;
-use std::cell::RefCell;
+
 use std::io;
 use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Arc;
 
-use slog::{debug, info, trace};
-
-use std::task::Context;
+use slog::{info, trace};
 
 pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     conn: Pin<Box<transport::IrcServerConnection<S>>>,
@@ -93,7 +87,7 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
                 self.real_name = Some(real_name);
             }
             IrcCommand::Pass { password } => self.password = Some(password),
-            c => {
+            _c => {
                 //debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
             }
         }

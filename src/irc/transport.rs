@@ -14,8 +14,8 @@
 
 use crate::ConnectionContext;
 
-use futures3::stream::Stream;
-use futures3::task::Poll;
+use futures::stream::Stream;
+use futures::task::Poll;
 
 use std::boxed::Box;
 use std::fmt::Write;
@@ -26,8 +26,8 @@ use std::task::Context;
 
 use super::protocol::{IrcCommand, Numeric};
 
+use tokio::io::AsyncWriteExt;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub struct IrcServerConnection<S>
 where

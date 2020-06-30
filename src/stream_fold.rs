@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures3::future::{Future, FutureExt};
-use futures3::stream::{Stream, StreamExt};
-use futures3::task::{Context, Poll};
+use futures::future::Future;
+use futures::stream::Stream;
+use futures::task::{Context, Poll};
 
 use std::boxed::Box;
-use std::cell::RefCell;
-use std::mem;
-use std::ops::Deref;
-use std::ops::DerefMut;
+
 use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Arc;
+
 use std::sync::Mutex;
 
 #[must_use = "futures do nothing unless polled"]

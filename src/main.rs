@@ -22,8 +22,7 @@ extern crate slog;
 
 use clap::{App, Arg};
 
-use futures3::stream::StreamExt;
-use futures3::{Future, Stream};
+use futures::stream::StreamExt;
 
 use slog::Drain;
 
@@ -31,14 +30,12 @@ use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
-use std::pin::Pin;
+
 use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
 use native_tls::Identity;
-
-//use tasked_futures::TaskExecutor;
 
 use std::task::Context;
 
@@ -51,9 +48,10 @@ lazy_static::lazy_static! {
     };
 }
 
-futures::task_local! {
+tokio::task_local! {
     // A task local context describing the connection (from an IRC client).
-    static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
+    //static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
+    static CONTEXT: RefCell<Option<ConnectionContext>>;
 }
 
 #[macro_use]
@@ -177,7 +175,7 @@ async fn main() {
         let cloned_ctx = ctx.clone();
 
         // Set up a new task for the connection. We do this early so that the logging is correct.
-        let setup_future = futures3::future::lazy(move |cx: &mut Context| {
+        let setup_future = futures::future::lazy(move |_cx: &mut Context| {
             debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
 
             CONTEXT.with(|m| {
@@ -194,8 +192,8 @@ async fn main() {
 
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
-            let spawn_fut = futures3::future::lazy(move |cx: &mut Context| async move {
-                let socket = setup_future.await;
+            let spawn_fut = futures::future::lazy(move |_cx: &mut Context| async move {
+                let _socket = setup_future.await;
                 let tls_socket = acceptor
                     .accept(tcp_stream)
                     .await
@@ -211,23 +209,24 @@ async fn main() {
                         .unwrap();
 
                 loop {
-                    bridge.poll_irc().await;
-                    bridge.poll_matrix().await;
-                }
 
-                //.map_err(
-                //    //|err: Box<dyn futures3::future::Future<Output=Result<_, bridge::Error>>>| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
-                //    |err| task_warn!("Unhandled IO error"; "error" => format!("{:?}", err)),
-                //);
+                    if let Err(_) = bridge.poll_irc().await {
+                        break
+                        // TODO: log this
+                    }
+                    if let Err(_) = bridge.poll_matrix().await {
+                        break
+                        // TODO: log this
+                    }
+                }
 
                 task_info!("Finished");
             });
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
-            //handle.spawn(future);
-
             tokio::task::spawn_local(spawn_fut);
+
         } else {
             // // Same as above except with less TLS.
             // let future = setup_future

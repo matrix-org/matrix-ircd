@@ -16,13 +16,8 @@
 
 use crate::ConnectionContext;
 
-//use futures::stream::Stream;
-//use futures::{Async, Future, Poll};
-use futures3::compat::Compat;
-use futures3::future::TryFutureExt;
-use futures3::prelude::{Future, Stream};
-use futures3::stream::StreamExt;
-use futures3::task::Poll;
+use futures::stream::StreamExt;
+use futures::task::Poll;
 
 use crate::irc::{IrcCommand, IrcUserConnection};
 
@@ -36,12 +31,9 @@ use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::task::Context;
 
 use serde_json::Value;
 
-//use tokio_core::reactor::Handle;
 use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 
@@ -109,7 +101,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                     self.matrix_client
                         .send_text_message(room_id, text)
                         .await
-                        .map_err(move |_| task_warn!("Failed to send"));
+                        .map_err(move |_| task_warn!("Failed to send"))
+                        .ok();
                 } else {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }
@@ -255,26 +248,24 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    pub async fn poll_irc(&mut self) -> Poll<Result<(), io::Error>> {
+    pub async fn poll_irc(&mut self) -> Result<(), io::Error> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
         if self.is_first_sync {
-            return Poll::Pending;
+            return Ok(())
         }
 
         loop {
             let poll_response = match self.irc_conn.as_mut().poll().await? {
                 Poll::Ready(x) => x,
-                Poll::Pending => return Poll::Pending,
+                Poll::Pending => return Ok(())
             };
 
             if let Some(line) = poll_response {
                 self.handle_irc_cmd(line).await;
             } else {
                 self.closed = true;
-                // TODO: figure out how to replicate this behavior with the task
-                //self.stop();
-                return Poll::Ready(Ok(()));
+                return Ok(());
             }
         }
     }

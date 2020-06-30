@@ -23,8 +23,8 @@ use url::Url;
 
 type CompatResponseFut = hyper::client::ResponseFuture;
 
-use futures3::prelude::{Future, Stream, TryFuture};
-use futures3::task::Poll;
+use futures::prelude::{Future, TryFuture};
+use futures::task::Poll;
 use std::task::Context;
 
 use crate::http;
@@ -47,10 +47,10 @@ enum RequestStatus {
 
 impl MatrixSyncClient {
     pub fn new(base_url: &Url, access_token: String) -> MatrixSyncClient {
-        let host = base_url.host_str().expect("expected host in base_url");
-        let port = base_url.port_or_known_default().unwrap();
+        let _host = base_url.host_str().expect("expected host in base_url");
+        let _port = base_url.port_or_known_default().unwrap();
 
-        let tls = match base_url.scheme() {
+        let _tls = match base_url.scheme() {
             "http" => false,
             "https" => true,
             _ => panic!("Unrecognized scheme {}", base_url.scheme()),
@@ -162,13 +162,13 @@ impl std::fmt::Debug for MatrixSyncClient {
     }
 }
 
-impl futures3::prelude::Stream for MatrixSyncClient {
+impl futures::prelude::Stream for MatrixSyncClient {
     type Item = Result<SyncResponse, io::Error>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> futures3::task::Poll<Option<Self::Item>> {
+    ) -> futures::task::Poll<Option<Self::Item>> {
         task_trace!("Matrix Sync Polled");
 
         match self.poll_sync(cx) {
