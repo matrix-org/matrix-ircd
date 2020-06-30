@@ -50,9 +50,9 @@ lazy_static::lazy_static! {
 
 tokio::task_local! {
     // A task local context describing the connection (from an IRC client).
-    //static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
     static CONTEXT: RefCell<Option<ConnectionContext>>;
 }
+
 
 #[macro_use]
 pub mod macros;
@@ -85,6 +85,8 @@ fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, St
 
 #[tokio::main]
 async fn main() {
+    CONTEXT.scope(RefCell::new(None),  async {}).await;
+
     let matches = App::new("IRC Matrix Daemon")
         .version(clap::crate_version!())
         .author(clap::crate_authors!())

@@ -325,13 +325,14 @@ impl Stream for MatrixClient {
 mod tests {
     use super::MatrixClient;
     use mockito::{mock, Matcher, Matcher::UrlEncoded};
+
     #[tokio::test]
     async fn matrix_login() {
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let username = "sample_username".to_string();
         let password = "sample_password".to_string();
 
-        let mock_req = mock("POST", "/_matrix/client/r0/login?")
+        let mock_req = mock("POST", "/_matrix/client/r0/login")
             .with_header("content-type", "application/json")
             .with_status(200)
             .create();
@@ -351,6 +352,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_text_message() {
+        crate::CONTEXT.scope(std::cell::RefCell::new(None),  async {}).await;
+
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let user_id = "sample_user_id".to_string();
         let token = "sample_token".to_string();

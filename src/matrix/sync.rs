@@ -181,37 +181,24 @@ impl futures::prelude::Stream for MatrixSyncClient {
 #[cfg(test)]
 mod tests {
     use super::MatrixSyncClient;
-    use futures::Stream;
-    use mockito::{mock, Matcher};
+    use futures::stream::StreamExt;
+    use mockito::mock;
 
-    #[test]
-    fn matrix_sync_request() {
+    #[tokio::test]
+    async fn matrix_sync_request() {
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let access_token = "sample_access_token";
-        let mut core = tokio_core::reactor::Core::new().expect("could not create a tokio core");
-        let handle = core.handle();
 
-        let client = MatrixSyncClient::new(handle.clone(), &base_url, access_token.to_string());
+        let client = MatrixSyncClient::new(&base_url, access_token.to_string());
 
-        let mock_req = mock("GET", "/_matrix/client/r0/sync")
+        let mock_req = mock("GET", "/_matrix/client/r0/sync?")
             .with_status(200)
-            // check queries added to the http request in MatrixSyncClient::poll_sync()
-            .match_query(Matcher::AllOf(vec![
-                Matcher::UrlEncoded("access_token".to_string(), access_token.to_string()),
-                Matcher::UrlEncoded(
-                    "filter".to_string(),
-                    r#"{"presence":{"not_types":["m.presence"]}}"#.to_string(),
-                ),
-                Matcher::UrlEncoded("timeout".to_string(), "30000".to_string()),
-            ]))
             .create();
 
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct, the error is outside the scope of this
         // test
-        if let Err(e) = core.run(client.into_future()) {
-            println!("MatrixSyncClient returned an error: {:?}", e)
-        }
+        client.into_future().await;
 
         mock_req.assert();
     }
