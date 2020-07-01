@@ -177,7 +177,7 @@ mod tests {
         // returned, but as long as the call is correct, the error is outside the scope of this
         // test
         if let Err(e) = core.run(client.into_future()) {
-            println! {"MatrixSyncClient returned an error: {:?}", e}
+            println!("MatrixSyncClient returned an error: {:?}", e)
         }
 
         mock_req.assert();
