@@ -321,6 +321,7 @@ impl Stream for MatrixClient {
 mod tests {
     use super::MatrixClient;
     use mockito::{mock, Matcher, Matcher::UrlEncoded};
+
     #[test]
     fn matrix_login() {
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
@@ -343,11 +344,8 @@ mod tests {
             username,
             password,
         )) {
-            println! {"MatrixSyncClient returned an error: {:?}", e}
+            println!("MatrixSyncClient returned an error: {:?}", e)
         }
-
-        // give the executor some time to execute the http request on a thread pool
-        std::thread::sleep(std::time::Duration::from_millis(200));
 
         mock_req.assert();
     }
@@ -384,7 +382,7 @@ mod tests {
         // returned, but as long as the call is correct the error is outside the scope of this
         // test. It is explicitly handled here in case the mock assert panics.
         if let Err(e) = core.run(client.send_text_message(room_id, "sample_body".to_string())) {
-            println! {"MatrixSyncClient returned an error: {:?}", e}
+            println!("MatrixSyncClient returned an error: {:?}", e)
         }
 
         // give the executor some time to execute the http request on a thread pool

@@ -79,8 +79,7 @@ impl MatrixSyncClient {
 
                     self.current_sync = Some(http_stream.send_request(Request {
                         method: "GET",
-                        //path: format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
-                        path: format!("{}?{}", self.url.path(), ""),
+                        path: format!("{}?{}", self.url.path(), self.url.query().unwrap_or("")),
                         headers: vec![],
                         body: vec![],
                     }));
@@ -150,7 +149,7 @@ impl Stream for MatrixSyncClient {
 mod tests {
     use super::MatrixSyncClient;
     use futures::Stream;
-    use mockito::mock;
+    use mockito::{mock, Matcher};
 
     #[test]
     fn matrix_sync_request() {
@@ -161,8 +160,17 @@ mod tests {
 
         let client = MatrixSyncClient::new(handle.clone(), &base_url, access_token.to_string());
 
-        let mock_req = mock("GET", "/_matrix/client/r0/sync?")
+        let mock_req = mock("GET", "/_matrix/client/r0/sync")
             .with_status(200)
+            // check queries added to the http request in MatrixSyncClient::poll_sync()
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("access_token".to_string(), access_token.to_string()),
+                Matcher::UrlEncoded(
+                    "filter".to_string(),
+                    r#"{"presence":{"not_types":["m.presence"]}}"#.to_string(),
+                ),
+                Matcher::UrlEncoded("timeout".to_string(), "30000".to_string()),
+            ]))
             .create();
 
         // run the future to completion. The future will error since invalid json is
@@ -171,9 +179,6 @@ mod tests {
         if let Err(e) = core.run(client.into_future()) {
             println! {"MatrixSyncClient returned an error: {:?}", e}
         }
-
-        // give the executor some time to execute the http request on a thread pool
-        std::thread::sleep(std::time::Duration::from_millis(200));
 
         mock_req.assert();
     }
