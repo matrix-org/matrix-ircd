@@ -123,6 +123,16 @@ impl MatrixSyncClient {
     }
 }
 
+impl std::fmt::Debug for MatrixSyncClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MatrixSyncClient")
+            .field("url", &self.url)
+            .field("access_token", &self.access_token)
+            .field("next_token", &self.next_token)
+            .finish()
+    }
+}
+
 impl Stream for MatrixSyncClient {
     type Item = SyncResponse;
     type Error = io::Error;
@@ -132,5 +142,44 @@ impl Stream for MatrixSyncClient {
 
         let res = futures::try_ready!(self.poll_sync());
         Ok(Async::Ready(Some(res)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MatrixSyncClient;
+    use futures::Stream;
+    use mockito::{mock, Matcher};
+
+    #[test]
+    fn matrix_sync_request() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let access_token = "sample_access_token";
+        let mut core = tokio_core::reactor::Core::new().expect("could not create a tokio core");
+        let handle = core.handle();
+
+        let client = MatrixSyncClient::new(handle.clone(), &base_url, access_token.to_string());
+
+        let mock_req = mock("GET", "/_matrix/client/r0/sync")
+            .with_status(200)
+            // check queries added to the http request in MatrixSyncClient::poll_sync()
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("access_token".to_string(), access_token.to_string()),
+                Matcher::UrlEncoded(
+                    "filter".to_string(),
+                    r#"{"presence":{"not_types":["m.presence"]}}"#.to_string(),
+                ),
+                Matcher::UrlEncoded("timeout".to_string(), "30000".to_string()),
+            ]))
+            .create();
+
+        // run the future to completion. The future will error since invalid json is
+        // returned, but as long as the call is correct, the error is outside the scope of this
+        // test
+        if let Err(e) = core.run(client.into_future()) {
+            println!("MatrixSyncClient returned an error: {:?}", e)
+        }
+
+        mock_req.assert();
     }
 }

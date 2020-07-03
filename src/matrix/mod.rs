@@ -316,3 +316,78 @@ impl Stream for MatrixClient {
         self.poll_sync()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MatrixClient;
+    use mockito::{mock, Matcher, Matcher::UrlEncoded};
+
+    #[test]
+    fn matrix_login() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let username = "sample_username".to_string();
+        let password = "sample_password".to_string();
+        let mut core = tokio_core::reactor::Core::new().expect("could not create a tokio core");
+        let handle = core.handle();
+
+        let mock_req = mock("POST", "/_matrix/client/r0/login?")
+            .with_header("content-type", "application/json")
+            .with_status(200)
+            .create();
+
+        // run the future to completion. The future will error since invalid json is
+        // returned, but as long as the call is correct the error is outside the scope of this
+        // test. It is explicitly handled here in case the mock assert panics.
+        if let Err(e) = core.run(MatrixClient::login(
+            handle.clone(),
+            base_url,
+            username,
+            password,
+        )) {
+            println!("MatrixSyncClient returned an error: {:?}", e)
+        }
+
+        mock_req.assert();
+    }
+
+    #[test]
+    fn send_text_message() {
+        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
+        let user_id = "sample_user_id".to_string();
+        let token = "sample_token".to_string();
+        let room_id = "room_id";
+        let mut core = tokio_core::reactor::Core::new().expect("could not create a tokio core");
+        let handle = core.handle();
+
+        let mock_req = mock(
+            "PUT",
+            Matcher::Regex(
+                r"^/_matrix/client/r0/rooms/(.+)/send/m.room.message/mircd-(\d+)$".to_string(),
+            ),
+        )
+        .match_query(UrlEncoded("access_token".to_string(), token.clone()))
+        .with_status(200)
+        .create();
+
+        let httpclient = crate::http::HttpClient::new(
+            base_url.host_str().unwrap().to_owned(),
+            base_url.port().unwrap(),
+            false,
+            handle.clone(),
+        );
+
+        let mut client = MatrixClient::new(handle.clone(), httpclient, &base_url, user_id, token);
+
+        // run the future to completion. The future will error since invalid json is
+        // returned, but as long as the call is correct the error is outside the scope of this
+        // test. It is explicitly handled here in case the mock assert panics.
+        if let Err(e) = core.run(client.send_text_message(room_id, "sample_body".to_string())) {
+            println!("MatrixSyncClient returned an error: {:?}", e)
+        }
+
+        // give the executor some time to execute the http request on a thread pool
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        mock_req.assert();
+    }
+}
