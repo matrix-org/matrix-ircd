@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//use futures::stream::Stream;
-//use futures::{Async, Future, Poll};
-
 use serde_json;
 
 use std::io;
@@ -32,6 +29,8 @@ use std::task::Context;
 
 use crate::http;
 
+use std::boxed::Box;
+
 pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
@@ -40,7 +39,6 @@ pub struct MatrixSyncClient {
     current_sync: RequestStatus,
 }
 
-use std::boxed::Box;
 enum RequestStatus {
     MadeRequest(CompatResponseFut),
     ConcatenatingResponse(Pin<Box<dyn Future<Output = Result<hyper::body::Bytes, hyper::Error>>>>),
