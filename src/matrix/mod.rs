@@ -352,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_text_message() {
-        crate::CONTEXT.scope(std::cell::RefCell::new(None),  async {}).await;
+        //crate::CONTEXT.scope(std::cell::RefCell::new(None),  async {}).await;
 
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let user_id = "sample_user_id".to_string();
