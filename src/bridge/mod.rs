@@ -252,13 +252,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
         if self.is_first_sync {
-            return Ok(())
+            return Ok(());
         }
 
         loop {
             let poll_response = match self.irc_conn.as_mut().poll().await? {
                 Poll::Ready(x) => x,
-                Poll::Pending => return Ok(())
+                Poll::Pending => return Ok(()),
             };
 
             if let Some(line) = poll_response {

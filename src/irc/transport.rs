@@ -197,6 +197,9 @@ where
         }
     }
 
+    /// poll_wite is an (almost) identical method to `write` with the exception that it is not
+    /// async since Stream::poll_next (implemented below) is not async, meaning we cant use async /
+    /// await there.
     fn poll_write(&mut self, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         loop {
             let mut inner = self.inner.lock().unwrap();
@@ -232,6 +235,11 @@ where
         }
     }
 
+    /// `write` is almost identical to `poll_write`, except for the fact that is async, and can
+    /// therfore take advantage of AsyncWriteExt::write. Having this method is a requirement for
+    /// the `write_line` method, which we are (basically) required to make async due to it being
+    /// called for all irc routines. These irc routies need to be async in order to make
+    /// `bridge/mod.rs` take advantage of async / await.
     async fn write(&mut self) -> Result<(), io::Error> {
         loop {
             let mut inner = self.inner.lock().unwrap();

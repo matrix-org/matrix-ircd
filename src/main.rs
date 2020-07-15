@@ -53,7 +53,6 @@ std::thread_local! {
     static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None);
 }
 
-
 #[macro_use]
 pub mod macros;
 pub mod bridge;
@@ -193,7 +192,8 @@ async fn main() {
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
             let spawn_fut = futures::future::lazy(move |_cx: &mut Context| async move {
-                let _socket = setup_future.await;
+                setup_future.await;
+
                 let tls_socket = acceptor
                     .accept(tcp_stream)
                     .await
@@ -208,14 +208,16 @@ async fn main() {
                         .await
                         .unwrap();
 
+                // TODO: I belive this is what taskedfutures did (except it was previously spawned
+                // off inside Bridge::create). I will come back and make sure this is correct
+                // later.
                 loop {
-
                     if let Err(_) = bridge.poll_irc().await {
-                        break
+                        break;
                         // TODO: log this
                     }
                     if let Err(_) = bridge.poll_matrix().await {
-                        break
+                        break;
                         // TODO: log this
                     }
                 }
@@ -225,20 +227,32 @@ async fn main() {
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
+            //
+            // These are spawn_local due to it not requiring spawn_fut to be Send, but it could
+            // possibly be `spawn` in the future after changing trait bounds.
             tokio::task::spawn_local(spawn_fut);
-
         } else {
-            // // Same as above except with less TLS.
-            // let future = setup_future
-            //     .and_then(move |socket| {
-            //         bridge::Bridge::create(cloned_url, socket, irc_server_name, ctx)
-            //     })
-            //     .map(|bridge| bridge.into_future())
-            //     .flatten()
-            //     .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
+            // Same as above except with less TLS.
+            let spawn_fut = futures::future::lazy(move |_cx: &mut Context| async move {
+                setup_future.await;
 
-            // //handle.spawn(future);
+                let mut bridge =
+                    bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx)
+                        .await
+                        .unwrap();
+                loop {
+                    if let Err(_) = bridge.poll_irc().await {
+                        break;
+                        // TODO: log this
+                    }
+                    if let Err(_) = bridge.poll_matrix().await {
+                        break;
+                        // TODO: log this
+                    }
+                }
+            });
+
+            tokio::task::spawn_local(spawn_fut);
         };
     }
-    //l.run(done).unwrap();
 }

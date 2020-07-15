@@ -182,7 +182,7 @@ impl futures::prelude::Stream for MatrixSyncClient {
 mod tests {
     use super::MatrixSyncClient;
     use futures::stream::StreamExt;
-    use mockito::mock;
+    use mockito::{mock, Matcher};
 
     #[tokio::test]
     async fn matrix_sync_request() {
@@ -191,8 +191,17 @@ mod tests {
 
         let client = MatrixSyncClient::new(&base_url, access_token.to_string());
 
-        let mock_req = mock("GET", "/_matrix/client/r0/sync?")
+        let mock_req = mock("GET", "/_matrix/client/r0/sync")
             .with_status(200)
+            // check queries added to the http request in MatrixSyncClient::poll_sync()
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("access_token".to_string(), access_token.to_string()),
+                Matcher::UrlEncoded(
+                    "filter".to_string(),
+                    r#"{"presence":{"not_types":["m.presence"]}}"#.to_string(),
+                ),
+                Matcher::UrlEncoded("timeout".to_string(), "30000".to_string()),
+            ]))
             .create();
 
         // run the future to completion. The future will error since invalid json is

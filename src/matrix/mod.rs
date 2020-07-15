@@ -43,7 +43,6 @@ mod sync;
 
 pub use self::models::{Member, Room};
 
-
 /// A single Matrix session.
 ///
 /// A `MatrixClient` both send requests and outputs a Stream of `SyncResponse`'s. It also keeps track
@@ -310,7 +309,6 @@ quick_error! {
         }
     }
 }
-
 
 impl Stream for MatrixClient {
     type Item = Result<protocol::SyncResponse, Error>;

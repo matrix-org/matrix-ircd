@@ -20,18 +20,31 @@ use std::boxed::Box;
 
 use std::pin::Pin;
 
-use std::sync::Mutex;
+use std::cell::RefCell;
 
+/// `StreamFold` provides a way to fold over a stream and update internal state with every new value.
+///
+/// StreamFold is used here instead of futures::stream::StreamExt::fold because this method has no
+/// way of returning _both_ the input stream and resulting state. Additionally, `StreamFold` has
+/// a mechanism for early-exits while StreamExt::fold will fold over the entire stream.
+
+// The stream must be Box<Pin<S>> since we call `poll_next` the Future impl. However, since
+// `DerefMut` is not implemented for Pin<&mut Self>, we cannot do `self.stream.as_mut()`, which is
+// required to call `poll_next`. To circumvent this, the stream is placed in a RefCell for interior
+// mutability.
+//
+// Since the state must be modified in (and the state update requires &mut self) the lack of
+// `DerefMut` on `Pin<&mut Self>` again requires RefCell. Hopefully these get optimized out.
 #[must_use = "futures do nothing unless polled"]
 pub struct StreamFold<S, W, T, V>
 where
     S: Stream<Item = Result<T, V>>,
     W: StateUpdate<Result<T, V>>,
 {
-    stream: Mutex<Pin<Box<S>>>,
-
+    //stream: Mutex<Pin<Box<S>>>,
+    stream: RefCell<Pin<Box<S>>>,
     // The variable that is being updated with every new value from self.stream
-    state: Mutex<W>,
+    state: RefCell<W>,
 }
 
 impl<W, T, V, S> StreamFold<S, W, T, V>
@@ -41,16 +54,13 @@ where
 {
     pub fn new(stream: S, state: W) -> StreamFold<S, W, T, V> {
         StreamFold {
-            state: Mutex::new(state),
-            stream: Mutex::new(Box::pin(stream)),
+            state: RefCell::new(state),
+            stream: RefCell::new(Box::pin(stream)),
         }
     }
 
     pub fn into_parts(self) -> (Pin<Box<S>>, W) {
-        (
-            self.stream.into_inner().unwrap(),
-            self.state.into_inner().unwrap(),
-        )
+        (self.stream.into_inner(), self.state.into_inner())
     }
 }
 
@@ -63,9 +73,9 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
-            match self.stream.lock().unwrap().as_mut().poll_next(cx) {
+            match self.stream.borrow_mut().as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
-                    if self.state.lock().unwrap().state_update(item) {
+                    if self.state.borrow_mut().state_update(item) {
                         return Poll::Ready(Some(()));
                     } else {
                         return Poll::Pending;
