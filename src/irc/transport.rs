@@ -69,8 +69,7 @@ where
             }
         }
 
-        // ignore the result of the poll
-        self.write().await.ok();
+        let _ = self.write().await;
     }
 
     pub async fn write_invalid_password(&mut self, nick: &str) {

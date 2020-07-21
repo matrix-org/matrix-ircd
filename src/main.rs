@@ -20,24 +20,23 @@
 #[macro_use]
 extern crate slog;
 
-use clap::{App, Arg};
-
-use futures::stream::StreamExt;
-
-use slog::Drain;
-
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
-
 use std::sync::Arc;
+use std::task::Context;
+
+use clap::{App, Arg};
+
+use futures::future;
+use futures::stream::StreamExt;
+
+use slog::Drain;
 
 use tokio::net::TcpListener;
 
 use native_tls::Identity;
-
-use std::task::Context;
 
 lazy_static::lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
@@ -169,12 +168,10 @@ async fn main() {
             peer_addr: addr,
         };
 
-        //let new_handle = handle.clone();
-
         let cloned_ctx = ctx.clone();
 
         // Set up a new task for the connection. We do this early so that the logging is correct.
-        let setup_future = futures::future::lazy(move |_cx: &mut Context| {
+        let setup_future = future::lazy(move |_cx: &mut Context| {
             debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
 
             CONTEXT.with(|m| {
@@ -191,7 +188,7 @@ async fn main() {
 
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
-            let spawn_fut = futures::future::lazy(move |_cx: &mut Context| async move {
+            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
                 setup_future.await;
 
                 let tls_socket = acceptor
@@ -212,11 +209,12 @@ async fn main() {
                 // off inside Bridge::create). I will come back and make sure this is correct
                 // later.
                 loop {
-                    if let Err(_) = bridge.poll_irc().await {
+                    if let Err(e) = bridge.poll_irc().await {
+                        task_warn!("Encounted error while polling IRC connection"; "error" => format!{"{}", e});
                         break;
-                        // TODO: log this
                     }
-                    if let Err(_) = bridge.poll_matrix().await {
+                    if let Err(e) = bridge.poll_matrix().await {
+                        task_warn!("Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                         break;
                         // TODO: log this
                     }
@@ -233,7 +231,7 @@ async fn main() {
             tokio::task::spawn_local(spawn_fut);
         } else {
             // Same as above except with less TLS.
-            let spawn_fut = futures::future::lazy(move |_cx: &mut Context| async move {
+            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
                 setup_future.await;
 
                 let mut bridge =
@@ -241,11 +239,12 @@ async fn main() {
                         .await
                         .unwrap();
                 loop {
-                    if let Err(_) = bridge.poll_irc().await {
+                    if let Err(e) = bridge.poll_irc().await {
+                        task_warn!("Encounted error while polling IRC connection"; "error" => format!{"{}", e});
                         break;
-                        // TODO: log this
                     }
-                    if let Err(_) = bridge.poll_matrix().await {
+                    if let Err(e) = bridge.poll_matrix().await {
+                        task_warn!("Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                         break;
                         // TODO: log this
                     }

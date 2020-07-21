@@ -14,7 +14,6 @@
 
 #![allow(unused_macros)]
 
-
 macro_rules! task_log {
     ($lvl:expr, $($args:tt)+) => {{
         use crate::CONTEXT;

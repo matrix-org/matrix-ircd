@@ -98,11 +98,12 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             IrcCommand::PrivMsg { channel, text } => {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
                     info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
-                    self.matrix_client
+
+                    let _ = self
+                        .matrix_client
                         .send_text_message(room_id, text)
                         .await
-                        .map_err(move |_| task_warn!("Failed to send"))
-                        .ok();
+                        .map_err(move |_| task_warn!("Failed to send"));
                 } else {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }
@@ -287,20 +288,6 @@ quick_error! {
             description("io error")
             display("I/O error: {}", err)
             cause(err)
-        }
-        InvalidPassword {
-            description("password was invalid")
-            display("Password is invalid")
-        }
-        HyperErr(err: hyper::Error) {
-            from()
-            description("hyper error when making http request")
-            display("Hyper error: {}", err)
-        }
-        SerdeErr(err: serde_json::Error) {
-            from()
-            description("could not serialize / deserialize struct")
-            display("Could not serialize request struct or deserialize response")
         }
         MatrixError(err: matrix::Error) {
             from()

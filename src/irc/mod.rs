@@ -47,12 +47,24 @@ pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
     server_model: models::ServerModel,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 struct UserNickBuilder {
+    ctx: ConnectionContext,
     nick: Option<String>,
     user: Option<String>,
     real_name: Option<String>,
     password: Option<String>,
+}
+impl UserNickBuilder {
+    fn with_context(ctx: ConnectionContext) -> Self {
+        UserNickBuilder {
+            ctx,
+            nick: None,
+            user: None,
+            real_name: None,
+            password: None,
+        }
+    }
 }
 
 impl UserNickBuilder {
@@ -61,34 +73,35 @@ impl UserNickBuilder {
             nick: self.nick.unwrap(),
             user: self.user.unwrap(),
             real_name: self.real_name.unwrap(),
-            password: self.password.unwrap(),
+            password: self.password,
         }
     }
+    /// Check that the user has input all fields except password.
+    ///
+    /// A missing password will be caught in `await_login`.
     fn is_complete(&self) -> bool {
-        self.nick.is_some()
-            && self.user.is_some()
-            && self.real_name.is_some()
-            && self.real_name.is_some()
-            && self.password.is_some()
+        self.nick.is_some() && self.user.is_some() && self.real_name.is_some()
     }
 }
 
 impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNickBuilder {
     fn state_update(&mut self, new_item: Result<IrcCommand, io::Error>) -> bool {
-        let new_item = match new_item {
-            Ok(good_update) => good_update,
+        let cmd = match new_item {
+            Ok(cmd) => cmd,
             Err(_) => return false,
         };
 
-        match new_item {
+        trace!(self.ctx.logger, "Got command"; "command" => cmd.command());
+
+        match cmd {
             IrcCommand::Nick { nick } => self.nick = Some(nick),
             IrcCommand::User { user, real_name } => {
                 self.user = Some(user);
                 self.real_name = Some(real_name);
             }
             IrcCommand::Pass { password } => self.password = Some(password),
-            _c => {
-                //debug!(ctx.logger, "Ignore command during login"; "cmd" => c.command());
+            c => {
+                debug!(self.ctx.logger, "Ignore command during login"; "cmd" => c.command());
             }
         }
         self.is_complete()
@@ -100,7 +113,7 @@ struct UserNick {
     nick: String,
     user: String,
     real_name: String,
-    password: String,
+    password: Option<String>,
 }
 
 impl<S> IrcUserConnection<S>
@@ -119,22 +132,39 @@ where
 
         let ctx_clone = ctx.clone();
 
-        let folder = crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::default());
+        let folder =
+            crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::with_context(ctx));
+
+        // We cant consusme the future since we need to split it into the irc connection and
+        // user_nick below
         (&folder).await;
 
-        let (irc_conn, user_nick) = folder.into_parts();
+        let (mut irc_conn, user_nick) = folder.into_parts();
 
         let irc_user = user_nick.to_user_nick();
 
         info!(ctx_clone.logger, "got nick and user");
+
         let user_prefix = format!("{}!{}@{}", &irc_user.nick, &irc_user.user, &server_name);
+
+        // Check that the password was collected in UserNickBuilder, otherwise send an error
+        // message through IRC
+        let password = if let Some(password) = irc_user.password {
+            password
+        } else {
+            irc_conn.write_password_required(&irc_user.nick).await;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "IRC user did not supply password",
+            ));
+        };
 
         let user_conn = IrcUserConnection {
             conn: irc_conn,
             user: irc_user.user,
             nick: irc_user.nick,
             real_name: irc_user.real_name,
-            password: irc_user.password,
+            password,
             server_name,
             user_prefix,
             server_model: models::ServerModel::new(),

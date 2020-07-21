@@ -84,17 +84,6 @@ impl MatrixClient {
         user: String,
         password: String,
     ) -> Result<MatrixClient, Error> {
-        let _host = base_url
-            .host_str()
-            .expect("expected host in base_url")
-            .to_string();
-        let _port = base_url.port_or_known_default().unwrap();
-        let _tls = match base_url.scheme() {
-            "http" => false,
-            "https" => true,
-            _ => panic!("Unrecognized scheme {}", base_url.scheme()),
-        };
-
         let mut http_client = http::ClientWrapper::new();
 
         let login = protocol::LoginPasswordInput {
@@ -350,8 +339,6 @@ mod tests {
 
     #[tokio::test]
     async fn send_text_message() {
-        //crate::CONTEXT.scope(std::cell::RefCell::new(None),  async {}).await;
-
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let user_id = "sample_user_id".to_string();
         let token = "sample_token".to_string();

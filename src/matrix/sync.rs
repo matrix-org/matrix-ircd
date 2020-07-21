@@ -47,15 +47,6 @@ enum RequestStatus {
 
 impl MatrixSyncClient {
     pub fn new(base_url: &Url, access_token: String) -> MatrixSyncClient {
-        let _host = base_url.host_str().expect("expected host in base_url");
-        let _port = base_url.port_or_known_default().unwrap();
-
-        let _tls = match base_url.scheme() {
-            "http" => false,
-            "https" => true,
-            _ => panic!("Unrecognized scheme {}", base_url.scheme()),
-        };
-
         MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token,
