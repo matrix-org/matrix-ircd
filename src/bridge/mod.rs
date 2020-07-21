@@ -99,11 +99,14 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
                     info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
 
-                    let _ = self
+                    if self
                         .matrix_client
                         .send_text_message(room_id, text)
                         .await
-                        .map_err(move |_| task_warn!("Failed to send"));
+                        .is_err()
+                    {
+                        task_warn!("Failed to send")
+                    }
                 } else {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
                 }

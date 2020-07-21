@@ -30,7 +30,6 @@ use futures::stream::StreamExt;
 use futures::task::Poll;
 
 use std::boxed::Box;
-
 use std::io;
 use std::pin::Pin;
 
@@ -55,6 +54,7 @@ struct UserNickBuilder {
     real_name: Option<String>,
     password: Option<String>,
 }
+
 impl UserNickBuilder {
     fn with_context(ctx: ConnectionContext) -> Self {
         UserNickBuilder {
@@ -76,6 +76,7 @@ impl UserNickBuilder {
             password: self.password,
         }
     }
+
     /// Check that the user has input all fields except password.
     ///
     /// A missing password will be caught in `await_login`.
@@ -135,7 +136,7 @@ where
         let folder =
             crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::with_context(ctx));
 
-        // We cant consusme the future since we need to split it into the irc connection and
+        // We cant consume the future since we need to split it into the irc connection and
         // user_nick below
         (&folder).await;
 
