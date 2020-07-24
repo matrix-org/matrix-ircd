@@ -182,7 +182,9 @@ mod tests {
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let access_token = "sample_access_token";
 
-        let client = MatrixSyncClient::new(&base_url, access_token.to_string());
+        let ctx = crate::ConnectionContext::testing_context();
+
+        let client = MatrixSyncClient::new(&base_url, access_token.to_string(), ctx);
 
         let mock_req = mock("GET", "/_matrix/client/r0/sync")
             .with_status(200)

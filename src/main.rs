@@ -61,6 +61,22 @@ pub struct ConnectionContext {
     logger: Arc<slog::Logger>,
     peer_addr: SocketAddr,
 }
+impl ConnectionContext {
+    /// Method for easily constructing a context in a test. This constructor should not be used
+    /// outside of a testing function
+    // dead code allowed here since its never used outside a testing function and will therefore
+    // give a compiler warning.
+    #[allow(dead_code)]
+    pub(crate) fn testing_context() -> Self {
+        let addr : SocketAddr =  "127.0.0.1:8080".parse().unwrap();
+        let log = DEFAULT_LOGGER.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
+        let peer_log = Arc::new(log);
+        Self {
+            logger: peer_log,
+            peer_addr: addr,
+        }
+    }
+}
 
 fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, String> {
     File::open(&cert_file)

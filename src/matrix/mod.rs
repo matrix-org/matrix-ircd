@@ -331,10 +331,12 @@ mod tests {
             .with_status(200)
             .create();
 
+        let ctx = crate::ConnectionContext::testing_context();
+
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct the error is outside the scope of this
         // test. It is explicitly handled here in case the mock assert panics.
-        if let Err(e) = MatrixClient::login(base_url, username, password).await {
+        if let Err(e) = MatrixClient::login(base_url, username, password, ctx).await {
             println! {"MatrixSyncClient returned an error: {:?}", e}
         }
 
@@ -363,7 +365,9 @@ mod tests {
 
         let httpclient = crate::http::ClientWrapper::new();
 
-        let mut client = MatrixClient::new(httpclient, &base_url, user_id, token);
+        let ctx = crate::ConnectionContext::testing_context();
+
+        let mut client = MatrixClient::new(httpclient, &base_url, user_id, token, ctx);
 
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct the error is outside the scope of this
