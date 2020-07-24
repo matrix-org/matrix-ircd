@@ -46,7 +46,6 @@ lazy_static::lazy_static! {
     };
 }
 
-
 #[macro_use]
 pub mod macros;
 pub mod bridge;
@@ -68,7 +67,7 @@ impl ConnectionContext {
     // give a compiler warning.
     #[allow(dead_code)]
     pub(crate) fn testing_context() -> Self {
-        let addr : SocketAddr =  "127.0.0.1:8080".parse().unwrap();
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let log = DEFAULT_LOGGER.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
         let peer_log = Arc::new(log);
         Self {

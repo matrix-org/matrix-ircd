@@ -56,7 +56,7 @@ pub struct MatrixClient {
     sync_client: Pin<Box<sync::MatrixSyncClient>>,
     rooms: BTreeMap<String, Room>,
     http_client: http::ClientWrapper,
-    ctx: ConnectionContext
+    ctx: ConnectionContext,
 }
 
 impl MatrixClient {
@@ -71,7 +71,11 @@ impl MatrixClient {
             url: base_url.clone(),
             user_id,
             access_token: access_token.clone(),
-            sync_client: Box::pin(sync::MatrixSyncClient::new(base_url, access_token, ctx.clone())),
+            sync_client: Box::pin(sync::MatrixSyncClient::new(
+                base_url,
+                access_token,
+                ctx.clone(),
+            )),
             rooms: BTreeMap::new(),
             http_client,
             ctx,
@@ -130,7 +134,7 @@ impl MatrixClient {
             &base_url,
             login_response.user_id,
             login_response.access_token,
-            ctx
+            ctx,
         );
         Ok(matrix_client)
     }

@@ -54,7 +54,7 @@ impl MatrixSyncClient {
             next_token: None,
             http_client: http::ClientWrapper::new(),
             current_sync: RequestStatus::NoRequest,
-            ctx
+            ctx,
         }
     }
 

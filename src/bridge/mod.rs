@@ -64,8 +64,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
     ) -> Result<Bridge<IS>, Error> {
         // make individual connections
         let irc_conn = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await?;
-        let matrix_client =
-            MatrixClient::login(base_url, irc_conn.user.clone(), irc_conn.password.clone(), ctx.clone()).await?;
+        let matrix_client = MatrixClient::login(
+            base_url,
+            irc_conn.user.clone(),
+            irc_conn.password.clone(),
+            ctx.clone(),
+        )
+        .await?;
 
         // setup connections to intermediate bridge
         let mut bridge = Bridge {
