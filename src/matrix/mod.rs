@@ -43,6 +43,8 @@ mod sync;
 
 pub use self::models::{Member, Room};
 
+use crate::ConnectionContext;
+
 /// A single Matrix session.
 ///
 /// A `MatrixClient` both send requests and outputs a Stream of `SyncResponse`'s. It also keeps track
@@ -54,6 +56,7 @@ pub struct MatrixClient {
     sync_client: Pin<Box<sync::MatrixSyncClient>>,
     rooms: BTreeMap<String, Room>,
     http_client: http::ClientWrapper,
+    ctx: ConnectionContext
 }
 
 impl MatrixClient {
@@ -62,14 +65,16 @@ impl MatrixClient {
         base_url: &Url,
         user_id: String,
         access_token: String,
+        ctx: ConnectionContext,
     ) -> MatrixClient {
         MatrixClient {
             url: base_url.clone(),
             user_id,
             access_token: access_token.clone(),
-            sync_client: Box::pin(sync::MatrixSyncClient::new(base_url, access_token)),
+            sync_client: Box::pin(sync::MatrixSyncClient::new(base_url, access_token, ctx.clone())),
             rooms: BTreeMap::new(),
             http_client,
+            ctx,
         }
     }
 
@@ -83,6 +88,7 @@ impl MatrixClient {
         base_url: Url,
         user: String,
         password: String,
+        ctx: ConnectionContext,
     ) -> Result<MatrixClient, Error> {
         let mut http_client = http::ClientWrapper::new();
 
@@ -124,6 +130,7 @@ impl MatrixClient {
             &base_url,
             login_response.user_id,
             login_response.access_token,
+            ctx
         );
         Ok(matrix_client)
     }
@@ -303,7 +310,7 @@ impl Stream for MatrixClient {
     type Item = Result<protocol::SyncResponse, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        task_trace!("Polled matrix client");
+        task_trace!(self.ctx, "Polled matrix client");
         self.poll_sync(cx)
     }
 }

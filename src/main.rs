@@ -20,7 +20,6 @@
 #[macro_use]
 extern crate slog;
 
-use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
@@ -47,10 +46,6 @@ lazy_static::lazy_static! {
     };
 }
 
-std::thread_local! {
-    // A task local context describing the connection (from an IRC client).
-    static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None);
-}
 
 #[macro_use]
 pub mod macros;
@@ -168,16 +163,16 @@ async fn main() {
             peer_addr: addr,
         };
 
-        let cloned_ctx = ctx.clone();
+        //let cloned_ctx = ctx.clone();
 
-        // Set up a new task for the connection. We do this early so that the logging is correct.
-        let setup_future = future::lazy(move |_cx: &mut Context| {
-            debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
+        //// Set up a new task for the connection. We do this early so that the logging is correct.
+        //let setup_future = future::lazy(move |_cx: &mut Context| {
+        //    debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
 
-            CONTEXT.with(|m| {
-                *m.borrow_mut() = Some(cloned_ctx);
-            });
-        });
+        //    CONTEXT.with(|m| {
+        //        *m.borrow_mut() = Some(cloned_ctx);
+        //    });
+        //});
 
         // TODO: This should be configurable. Maybe use the matrix HS server_name?
         let irc_server_name = "localhost".into();
@@ -189,19 +184,19 @@ async fn main() {
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
             let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
-                setup_future.await;
+                debug!(ctx.logger.as_ref(), "Accepted connection");
 
                 let tls_socket = acceptor
                     .accept(tcp_stream)
                     .await
                     .map_err(|err| {
-                        task_warn!("TLS handshake failed"; "error" => format!("{}", err));
+                        task_warn!(ctx, "TLS handshake failed"; "error" => format!("{}", err));
                         io::Error::new(io::ErrorKind::Other, err);
                     })
                     .unwrap();
 
                 let mut bridge =
-                    bridge::Bridge::create(cloned_url, tls_socket, irc_server_name, ctx)
+                    bridge::Bridge::create(cloned_url, tls_socket, irc_server_name, ctx.clone())
                         .await
                         .unwrap();
 
@@ -210,17 +205,17 @@ async fn main() {
                 // later.
                 loop {
                     if let Err(e) = bridge.poll_irc().await {
-                        task_warn!("Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
                         break;
                     }
                     if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!("Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                         break;
                         // TODO: log this
                     }
                 }
 
-                task_info!("Finished");
+                task_info!(ctx, "Finished");
             });
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
@@ -232,19 +227,19 @@ async fn main() {
         } else {
             // Same as above except with less TLS.
             let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
-                setup_future.await;
+                debug!(ctx.logger.as_ref(), "Accepted connection");
 
                 let mut bridge =
-                    bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx)
+                    bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
                         .await
                         .unwrap();
                 loop {
                     if let Err(e) = bridge.poll_irc().await {
-                        task_warn!("Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
                         break;
                     }
                     if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!("Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                         break;
                         // TODO: log this
                     }

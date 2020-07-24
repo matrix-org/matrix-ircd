@@ -65,7 +65,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         // make individual connections
         let irc_conn = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await?;
         let matrix_client =
-            MatrixClient::login(base_url, irc_conn.user.clone(), irc_conn.password.clone()).await?;
+            MatrixClient::login(base_url, irc_conn.user.clone(), irc_conn.password.clone(), ctx.clone()).await?;
 
         // setup connections to intermediate bridge
         let mut bridge = Bridge {
@@ -105,7 +105,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                         .await
                         .is_err()
                     {
-                        task_warn!("Failed to send")
+                        task_warn!(self.ctx, "Failed to send")
                     }
                 } else {
                     warn!(self.ctx.logger, "Unknown channel"; "channel" => channel.as_str());
@@ -124,23 +124,23 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
                 let room_id = join_future.room_id;
 
-                task_info!("Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
+                task_info!(self.ctx, "Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
 
                 if let Some(mapped_channel) = self.mappings.room_id_to_channel(&room_id) {
                     if mapped_channel == &channel {
                         // We've already joined this channel, most likely we got the sync
                         // response before the joined response.
                         // TODO: Do we wan to send something to IRC?
-                        task_trace!("Already in IRC channel");
+                        task_trace!(self.ctx, "Already in IRC channel");
                     } else {
                         // We respond to the join with a redirect!
-                        task_trace!("Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
+                        task_trace!(self.ctx, "Redirecting channl"; "prev" => channel.clone(), "new" => mapped_channel.clone());
                         self.irc_conn
                             .write_redirect_join(&channel, mapped_channel)
                             .await;
                     }
                 } else {
-                    task_trace!("Waiting for room to come down sync"; "room_id" => room_id.clone());
+                    task_trace!(self.ctx, "Waiting for room to come down sync"; "room_id" => room_id.clone());
                     self.joining_map.insert(room_id, channel);
                 };
             }

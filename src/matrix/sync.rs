@@ -27,7 +27,7 @@ use futures::prelude::{Future, TryFuture};
 use futures::task::Poll;
 use std::task::Context;
 
-use crate::http;
+use crate::{http, ConnectionContext};
 
 use std::boxed::Box;
 
@@ -37,6 +37,7 @@ pub struct MatrixSyncClient {
     next_token: Option<String>,
     http_client: http::ClientWrapper,
     current_sync: RequestStatus,
+    ctx: ConnectionContext,
 }
 
 enum RequestStatus {
@@ -46,18 +47,19 @@ enum RequestStatus {
 }
 
 impl MatrixSyncClient {
-    pub fn new(base_url: &Url, access_token: String) -> MatrixSyncClient {
+    pub fn new(base_url: &Url, access_token: String, ctx: ConnectionContext) -> MatrixSyncClient {
         MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token,
             next_token: None,
             http_client: http::ClientWrapper::new(),
             current_sync: RequestStatus::NoRequest,
+            ctx
         }
     }
 
     pub fn poll_sync(&mut self, cx: &mut Context<'_>) -> Poll<Result<SyncResponse, io::Error>> {
-        task_trace!("Polled sync");
+        task_trace!(self.ctx, "Polled sync");
         loop {
             match &mut self.current_sync {
                 // There is currently no active request to the matrix server, so we make one
@@ -72,7 +74,7 @@ impl MatrixSyncClient {
                     let response = match request.try_poll(cx) {
                         Poll::Ready(Ok(r)) => r,
                         Poll::Ready(Err(e)) => {
-                            task_info!("Error doing sync"; "error" => format!("{}", e));
+                            task_info!(self.ctx, "Error doing sync"; "error" => format!("{}", e));
                             self.current_sync = RequestStatus::NoRequest;
                             continue;
                         }
@@ -113,7 +115,7 @@ impl MatrixSyncClient {
                             )
                         })?;
 
-                    task_trace!("Got sync response"; "next_token" => sync_response.next_batch.clone());
+                    task_trace!(self.ctx, "Got sync response"; "next_token" => sync_response.next_batch.clone());
                     self.next_token = Some(sync_response.next_batch.clone());
                     return Poll::Ready(Ok(sync_response));
                 }
@@ -160,7 +162,7 @@ impl futures::prelude::Stream for MatrixSyncClient {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> futures::task::Poll<Option<Self::Item>> {
-        task_trace!("Matrix Sync Polled");
+        task_trace!(self.ctx, "Matrix Sync Polled");
 
         match self.poll_sync(cx) {
             Poll::Ready(response) => Poll::Ready(Some(response)),
