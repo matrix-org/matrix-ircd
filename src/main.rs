@@ -178,17 +178,6 @@ async fn main() {
             peer_addr: addr,
         };
 
-        //let cloned_ctx = ctx.clone();
-
-        //// Set up a new task for the connection. We do this early so that the logging is correct.
-        //let setup_future = future::lazy(move |_cx: &mut Context| {
-        //    debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
-
-        //    CONTEXT.with(|m| {
-        //        *m.borrow_mut() = Some(cloned_ctx);
-        //    });
-        //});
-
         // TODO: This should be configurable. Maybe use the matrix HS server_name?
         let irc_server_name = "localhost".into();
 
