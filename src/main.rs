@@ -167,7 +167,7 @@ async fn main() {
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
             addr
         } else {
-            // TODO: log this
+            debug!(log, "Could not fetch peer address from tcp stream. Bridge will not be setup");
             continue;
         };
 
@@ -215,7 +215,6 @@ async fn main() {
                     if let Err(e) = bridge.poll_matrix().await {
                         task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                         break;
-                        // TODO: log this
                     }
                 }
 
@@ -245,7 +244,6 @@ async fn main() {
                     if let Err(e) = bridge.poll_matrix().await {
                         task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
                         break;
-                        // TODO: log this
                     }
                 }
             });
