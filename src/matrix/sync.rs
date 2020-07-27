@@ -23,11 +23,11 @@ use url::Url;
 
 type CompatResponseFut = hyper::client::ResponseFuture;
 
-use futures3::prelude::{Future, Stream, TryFuture};
-use futures3::task::Poll;
+use futures::prelude::{Future, TryFuture};
+use futures::task::Poll;
 use std::task::Context;
 
-use crate::http;
+use crate::{http, ConnectionContext};
 
 use std::boxed::Box;
 
@@ -37,6 +37,7 @@ pub struct MatrixSyncClient {
     next_token: Option<String>,
     http_client: http::ClientWrapper,
     current_sync: RequestStatus,
+    ctx: ConnectionContext,
 }
 
 enum RequestStatus {
@@ -46,27 +47,19 @@ enum RequestStatus {
 }
 
 impl MatrixSyncClient {
-    pub fn new(base_url: &Url, access_token: String) -> MatrixSyncClient {
-        let host = base_url.host_str().expect("expected host in base_url");
-        let port = base_url.port_or_known_default().unwrap();
-
-        let tls = match base_url.scheme() {
-            "http" => false,
-            "https" => true,
-            _ => panic!("Unrecognized scheme {}", base_url.scheme()),
-        };
-
+    pub fn new(base_url: &Url, access_token: String, ctx: ConnectionContext) -> MatrixSyncClient {
         MatrixSyncClient {
             url: base_url.join("/_matrix/client/r0/sync").unwrap(),
             access_token,
             next_token: None,
             http_client: http::ClientWrapper::new(),
             current_sync: RequestStatus::NoRequest,
+            ctx,
         }
     }
 
     pub fn poll_sync(&mut self, cx: &mut Context<'_>) -> Poll<Result<SyncResponse, io::Error>> {
-        task_trace!("Polled sync");
+        task_trace!(self.ctx, "Polled sync");
         loop {
             match &mut self.current_sync {
                 // There is currently no active request to the matrix server, so we make one
@@ -81,7 +74,7 @@ impl MatrixSyncClient {
                     let response = match request.try_poll(cx) {
                         Poll::Ready(Ok(r)) => r,
                         Poll::Ready(Err(e)) => {
-                            task_info!("Error doing sync"; "error" => format!("{}", e));
+                            task_info!(self.ctx, "Error doing sync"; "error" => format!("{}", e));
                             self.current_sync = RequestStatus::NoRequest;
                             continue;
                         }
@@ -122,7 +115,7 @@ impl MatrixSyncClient {
                             )
                         })?;
 
-                    task_trace!("Got sync response"; "next_token" => sync_response.next_batch.clone());
+                    task_trace!(self.ctx, "Got sync response"; "next_token" => sync_response.next_batch.clone());
                     self.next_token = Some(sync_response.next_batch.clone());
                     return Poll::Ready(Ok(sync_response));
                 }
@@ -162,14 +155,14 @@ impl std::fmt::Debug for MatrixSyncClient {
     }
 }
 
-impl futures3::prelude::Stream for MatrixSyncClient {
+impl futures::prelude::Stream for MatrixSyncClient {
     type Item = Result<SyncResponse, io::Error>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> futures3::task::Poll<Option<Self::Item>> {
-        task_trace!("Matrix Sync Polled");
+    ) -> futures::task::Poll<Option<Self::Item>> {
+        task_trace!(self.ctx, "Matrix Sync Polled");
 
         match self.poll_sync(cx) {
             Poll::Ready(response) => Poll::Ready(Some(response)),
@@ -181,17 +174,17 @@ impl futures3::prelude::Stream for MatrixSyncClient {
 #[cfg(test)]
 mod tests {
     use super::MatrixSyncClient;
-    use futures::Stream;
+    use futures::stream::StreamExt;
     use mockito::{mock, Matcher};
 
-    #[test]
-    fn matrix_sync_request() {
+    #[tokio::test]
+    async fn matrix_sync_request() {
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let access_token = "sample_access_token";
-        let mut core = tokio_core::reactor::Core::new().expect("could not create a tokio core");
-        let handle = core.handle();
 
-        let client = MatrixSyncClient::new(handle.clone(), &base_url, access_token.to_string());
+        let ctx = crate::ConnectionContext::testing_context();
+
+        let client = MatrixSyncClient::new(&base_url, access_token.to_string(), ctx);
 
         let mock_req = mock("GET", "/_matrix/client/r0/sync")
             .with_status(200)
@@ -209,9 +202,7 @@ mod tests {
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct, the error is outside the scope of this
         // test
-        if let Err(e) = core.run(client.into_future()) {
-            println!("MatrixSyncClient returned an error: {:?}", e)
-        }
+        client.into_future().await;
 
         mock_req.assert();
     }

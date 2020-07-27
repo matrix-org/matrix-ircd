@@ -12,65 +12,81 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::Future;
 use futures::stream::Stream;
-use futures::{Async, Future, Poll};
+use futures::task::{Context, Poll};
 
-use std::mem;
+use std::boxed::Box;
+use std::cell::RefCell;
+use std::pin::Pin;
 
-/// A Stream adapater, similar to fold, that consumes the start of the stream to build up an
-/// object, but then returns both the object *and* the stream.
+/// `StreamFold` provides a way to fold over a stream and update internal state with every new value.
+///
+/// StreamFold is used here instead of futures::stream::StreamExt::fold because this method has no
+/// way of returning _both_ the input stream and resulting state. Additionally, `StreamFold` has
+/// a mechanism for early-exits while StreamExt::fold will fold over the entire stream.
+
+// The stream must be Box<Pin<S>> since we call `poll_next` the Future impl. However, since
+// `DerefMut` is not implemented for Pin<&mut Self>, we cannot do `self.stream.as_mut()`, which is
+// required to call `poll_next`. To circumvent this, the stream is placed in a RefCell for interior
+// mutability.
+//
+// Since the state must be modified in (and the state update requires &mut self) the lack of
+// `DerefMut` on `Pin<&mut Self>` again requires RefCell. Hopefully these get optimized out.
 #[must_use = "futures do nothing unless polled"]
-pub struct StreamFold<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)> {
-    func: F,
-    state: StreamFoldState<S, V>,
+pub struct StreamFold<S, W, T, V>
+where
+    S: Stream<Item = Result<T, V>>,
+    W: StateUpdate<Result<T, V>>,
+{
+    stream: RefCell<Pin<Box<S>>>,
+    // The variable that is being updated with every new value from self.stream
+    state: RefCell<W>,
 }
 
-impl<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)>
-    StreamFold<I, E, S, V, F>
+impl<W, T, V, S> StreamFold<S, W, T, V>
+where
+    W: StateUpdate<Result<T, V>>,
+    S: Stream<Item = Result<T, V>>,
 {
-    pub fn new(stream: S, value: V, func: F) -> StreamFold<I, E, S, V, F> {
+    pub fn new(stream: S, state: W) -> StreamFold<S, W, T, V> {
         StreamFold {
-            func,
-            state: StreamFoldState::Full { stream, value },
+            state: RefCell::new(state),
+            stream: RefCell::new(Box::pin(stream)),
         }
+    }
+
+    pub fn into_parts(self) -> (Pin<Box<S>>, W) {
+        (self.stream.into_inner(), self.state.into_inner())
     }
 }
 
-enum StreamFoldState<S, V> {
-    Empty,
-    Full { stream: S, value: V },
-}
-
-impl<I, E, S: Stream<Item = I, Error = E>, V, F: FnMut(I, V) -> (bool, V)> Future
-    for StreamFold<I, E, S, V, F>
+impl<W, T, V, S> Future for &StreamFold<S, W, T, V>
+where
+    W: StateUpdate<Result<T, V>>,
+    S: Stream<Item = Result<T, V>>,
 {
-    type Item = Option<(V, S)>;
-    type Error = E;
+    type Output = Option<()>;
 
-    fn poll(&mut self) -> Poll<Option<(V, S)>, E> {
-        let (mut stream, mut value) = match mem::replace(&mut self.state, StreamFoldState::Empty) {
-            StreamFoldState::Empty => panic!("cannot poll Fold twice"),
-            StreamFoldState::Full { stream, value } => (stream, value),
-        };
-
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
-            match stream.poll()? {
-                Async::Ready(Some(item)) => {
-                    let (done, val) = (self.func)(item, value);
-                    value = val;
-                    if done {
-                        return Ok(Async::Ready(Some((value, stream))));
+            match self.stream.borrow_mut().as_mut().poll_next(cx) {
+                Poll::Ready(Some(item)) => {
+                    if self.state.borrow_mut().state_update(item) {
+                        return Poll::Ready(Some(()));
+                    } else {
+                        return Poll::Pending;
                     }
                 }
-                Async::Ready(None) => return Ok(Async::Ready(None)),
-                Async::NotReady => {
-                    self.state = StreamFoldState::Full {
-                        stream: stream,
-                        value: value,
-                    };
-                    return Ok(Async::NotReady);
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => {
+                    return Poll::Pending;
                 }
             }
         }
     }
+}
+
+pub trait StateUpdate<Z> {
+    fn state_update(&mut self, new_item: Z) -> bool;
 }

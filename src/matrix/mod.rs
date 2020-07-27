@@ -16,13 +16,13 @@
 //!
 //! It knows nothing about IRC.
 
-use futures3::prelude::Stream;
-use futures3::task::Poll;
+use futures::prelude::Stream;
+use futures::task::Poll;
 
+use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::io;
 use std::pin::Pin;
-use std::boxed::Box;
 use std::task::Context;
 
 use url::percent_encoding::{percent_encode, PATH_SEGMENT_ENCODE_SET};
@@ -43,6 +43,7 @@ mod sync;
 
 pub use self::models::{Member, Room};
 
+use crate::ConnectionContext;
 
 /// A single Matrix session.
 ///
@@ -55,6 +56,7 @@ pub struct MatrixClient {
     sync_client: Pin<Box<sync::MatrixSyncClient>>,
     rooms: BTreeMap<String, Room>,
     http_client: http::ClientWrapper,
+    ctx: ConnectionContext,
 }
 
 impl MatrixClient {
@@ -63,14 +65,20 @@ impl MatrixClient {
         base_url: &Url,
         user_id: String,
         access_token: String,
+        ctx: ConnectionContext,
     ) -> MatrixClient {
         MatrixClient {
             url: base_url.clone(),
             user_id,
             access_token: access_token.clone(),
-            sync_client: Box::pin(sync::MatrixSyncClient::new(base_url, access_token)),
+            sync_client: Box::pin(sync::MatrixSyncClient::new(
+                base_url,
+                access_token,
+                ctx.clone(),
+            )),
             rooms: BTreeMap::new(),
             http_client,
+            ctx,
         }
     }
 
@@ -84,41 +92,50 @@ impl MatrixClient {
         base_url: Url,
         user: String,
         password: String,
-    ) ->  Result<MatrixClient, Error> {
-        let host = base_url
-            .host_str()
-            .expect("expected host in base_url")
-            .to_string();
-        let port = base_url.port_or_known_default().unwrap();
-        let tls = match base_url.scheme() {
-            "http" => false,
-            "https" => true,
-            _ => panic!("Unrecognized scheme {}", base_url.scheme()),
-        };
-
+        ctx: ConnectionContext,
+    ) -> Result<MatrixClient, Error> {
         let mut http_client = http::ClientWrapper::new();
-        
-        let login = protocol::LoginPasswordInput { user, password, login_type: "m.login.password".to_string()};
+
+        let login = protocol::LoginPasswordInput {
+            user,
+            password,
+            login_type: "m.login.password".to_string(),
+        };
         let json_bytes = serde_json::to_vec(&login).expect("could not serialize login to json");
         let body = json_bytes.into();
-        
+
         let request = hyper::Request::builder()
             .method("POST")
-            .uri(base_url.join("/_matrix/client/r0/login").expect("could not join login path").as_str().parse::<hyper::Uri>().unwrap())
+            .uri(
+                base_url
+                    .join("/_matrix/client/r0/login")
+                    .expect("could not join login path")
+                    .as_str()
+                    .parse::<hyper::Uri>()
+                    .unwrap(),
+            )
             .body(body)
             .expect("request could not be built");
 
         let login = http_client.send_request(request).await?;
-        
-        let status_code= login.status().as_u16();
+
+        let status_code = login.status().as_u16();
         if status_code == 401 || status_code == 403 {
-            return Err(JsonPostError::ErrorResponse(status_code).into_io_error().into());
+            return Err(JsonPostError::ErrorResponse(status_code)
+                .into_io_error()
+                .into());
         }
 
         let body_bytes = hyper::body::to_bytes(login.into_body()).await?;
-        let login_response : protocol::LoginResponse = serde_json::from_slice(&body_bytes)?;
+        let login_response: protocol::LoginResponse = serde_json::from_slice(&body_bytes)?;
 
-        let matrix_client = MatrixClient::new(http_client, &base_url, login_response.user_id, login_response.access_token);
+        let matrix_client = MatrixClient::new(
+            http_client,
+            &base_url,
+            login_response.user_id,
+            login_response.access_token,
+            ctx,
+        );
         Ok(matrix_client)
     }
 
@@ -140,14 +157,18 @@ impl MatrixClient {
             .clear()
             .append_pair("access_token", &self.access_token);
 
-        let body = serde_json::to_vec(&protocol::RoomSendInput {body, msgtype: "m.text".to_string()})?.into();
+        let body = serde_json::to_vec(&protocol::RoomSendInput {
+            body,
+            msgtype: "m.text".to_string(),
+        })?
+        .into();
 
         let request = hyper::Request::builder()
             .method("PUT")
             .uri(url.as_str().parse::<hyper::Uri>().unwrap())
             .body(body)
             .expect("request could not be built");
-        
+
         // TODO: improve this error handling
         let response = self.http_client.send_request(request).await?;
         let bytes = hyper::body::to_bytes(response.into_body()).await?;
@@ -156,10 +177,7 @@ impl MatrixClient {
         Ok(json_response)
     }
 
-    pub async fn join_room(
-        &mut self,
-        room_id: &str,
-    ) -> Result<protocol::RoomJoinResponse, Error> {
+    pub async fn join_room(&mut self, room_id: &str) -> Result<protocol::RoomJoinResponse, Error> {
         let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
         let mut url = self
             .url
@@ -204,12 +222,15 @@ impl MatrixClient {
         }
     }
 
-    fn poll_sync(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<protocol::SyncResponse, Error>>> {
+    fn poll_sync(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Option<Result<protocol::SyncResponse, Error>>> {
         let resp = match self.sync_client.as_mut().poll_next(cx)? {
             Poll::Ready(x) => x,
             Poll::Pending => return Poll::Pending,
         };
-        
+
         if let Some(mut sync_response) = resp {
             for (room_id, sync) in &mut sync_response.rooms.join {
                 sync.timeline.events.retain(|ev| {
@@ -229,9 +250,8 @@ impl MatrixClient {
                 self.rooms
                     .insert(room_id.clone(), Room::from_sync(room_id.clone(), sync));
             }
-           Poll::Ready( Some(Ok(sync_response)))
-        }
-        else {
+            Poll::Ready(Some(Ok(sync_response)))
+        } else {
             Poll::Ready(None)
         }
     }
@@ -290,12 +310,11 @@ quick_error! {
     }
 }
 
-
 impl Stream for MatrixClient {
     type Item = Result<protocol::SyncResponse, Error>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        task_trace!("Polled matrix client");
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        task_trace!(self.ctx, "Polled matrix client");
         self.poll_sync(cx)
     }
 }
@@ -304,25 +323,24 @@ impl Stream for MatrixClient {
 mod tests {
     use super::MatrixClient;
     use mockito::{mock, Matcher, Matcher::UrlEncoded};
+
     #[tokio::test]
     async fn matrix_login() {
         let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
         let username = "sample_username".to_string();
         let password = "sample_password".to_string();
 
-        let mock_req = mock("POST", "/_matrix/client/r0/login?")
+        let mock_req = mock("POST", "/_matrix/client/r0/login")
             .with_header("content-type", "application/json")
             .with_status(200)
             .create();
 
+        let ctx = crate::ConnectionContext::testing_context();
+
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct the error is outside the scope of this
         // test. It is explicitly handled here in case the mock assert panics.
-        if let Err(e) = MatrixClient::login(
-            base_url,
-            username,
-            password,
-        ).await {
+        if let Err(e) = MatrixClient::login(base_url, username, password, ctx).await {
             println! {"MatrixSyncClient returned an error: {:?}", e}
         }
 
@@ -351,12 +369,17 @@ mod tests {
 
         let httpclient = crate::http::ClientWrapper::new();
 
-        let mut client = MatrixClient::new(httpclient, &base_url, user_id, token);
+        let ctx = crate::ConnectionContext::testing_context();
+
+        let mut client = MatrixClient::new(httpclient, &base_url, user_id, token, ctx);
 
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct the error is outside the scope of this
         // test. It is explicitly handled here in case the mock assert panics.
-        if let Err(e) = client.send_text_message(room_id, "sample_body".to_string()).await {
+        if let Err(e) = client
+            .send_text_message(room_id, "sample_body".to_string())
+            .await
+        {
             println! {"MatrixSyncClient returned an error: {:?}", e}
         }
 

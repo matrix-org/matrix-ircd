@@ -20,25 +20,22 @@
 #[macro_use]
 extern crate slog;
 
-use clap::{App, Arg};
-
-use futures::stream::Stream;
-use futures::Future;
-
-use slog::Drain;
-
-use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::task::Context;
 
-use tokio_core::net::TcpListener;
-use tokio_core::reactor::Core;
+use clap::{App, Arg};
 
-use native_tls::{Identity, TlsAcceptor};
+use futures::future;
+use futures::stream::StreamExt;
 
-use tasked_futures::TaskExecutor;
+use slog::Drain;
+
+use tokio::net::TcpListener;
+
+use native_tls::Identity;
 
 lazy_static::lazy_static! {
     static ref DEFAULT_LOGGER: slog::Logger = {
@@ -47,11 +44,6 @@ lazy_static::lazy_static! {
         let drain = slog_async::Async::new(drain).build().fuse();
         slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
     };
-}
-
-futures::task_local! {
-    // A task local context describing the connection (from an IRC client).
-    static CONTEXT: RefCell<Option<ConnectionContext>> = RefCell::new(None)
 }
 
 #[macro_use]
@@ -68,6 +60,22 @@ pub struct ConnectionContext {
     logger: Arc<slog::Logger>,
     peer_addr: SocketAddr,
 }
+impl ConnectionContext {
+    /// Method for easily constructing a context in a test. This constructor should not be used
+    /// outside of a testing function
+    // dead code allowed here since its never used outside a testing function and will therefore
+    // give a compiler warning.
+    #[allow(dead_code)]
+    pub(crate) fn testing_context() -> Self {
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let log = DEFAULT_LOGGER.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
+        let peer_log = Arc::new(log);
+        Self {
+            logger: peer_log,
+            peer_addr: addr,
+        }
+    }
+}
 
 fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, String> {
     File::open(&cert_file)
@@ -83,7 +91,8 @@ fn load_pkcs12_from_file(cert_file: &str, password: &str) -> Result<Identity, St
         })
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let matches = App::new("IRC Matrix Daemon")
         .version(clap::crate_version!())
         .author(clap::crate_authors!())
@@ -142,43 +151,32 @@ fn main() {
         let pass = matches.value_of("PASSWORD").unwrap();
 
         let pkcs12 = load_pkcs12_from_file(pkcs12_file, pass).expect("error reading pkcs12");
-        let acceptor = TlsAcceptor::builder(pkcs12).build().unwrap();
-        let tokio_acceptor = tokio_tls::TlsAcceptor::from(acceptor);
+        let acceptor = native_tls::TlsAcceptor::builder(pkcs12).build().unwrap();
+        let tokio_acceptor = tokio_native_tls::TlsAcceptor::from(acceptor);
         Some(Arc::new(tokio_acceptor))
     } else {
         None
     };
 
-    let mut l = Core::new().unwrap();
-    let handle = l.handle();
-
-    let socket = TcpListener::bind(&addr, &handle).unwrap();
+    let mut socket = Box::pin(TcpListener::bind(&addr).await.unwrap());
 
     info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
     // This is the main loop where we accept incoming *TCP* connections.
-    let done = socket.incoming().for_each(move |(socket, addr)| {
+    while let Some(Ok(tcp_stream)) = socket.next().await {
+        let addr = if let Ok(addr) = tcp_stream.peer_addr() {
+            addr
+        } else {
+            debug!(log, "Could not fetch peer address from tcp stream. Bridge will not be setup");
+            continue;
+        };
+
         let peer_log = log.new(o!("ip" => format!("{}", addr.ip()), "port" => addr.port()));
 
         let ctx = ConnectionContext {
             logger: Arc::new(peer_log),
             peer_addr: addr,
         };
-
-        let new_handle = handle.clone();
-
-        let cloned_ctx = ctx.clone();
-
-        // Set up a new task for the connection. We do this early so that the logging is correct.
-        let setup_future = futures::lazy(move || {
-            debug!(cloned_ctx.logger.as_ref(), "Accepted connection");
-
-            CONTEXT.with(|m| {
-                *m.borrow_mut() = Some(cloned_ctx);
-            });
-
-            Ok(socket)
-        });
 
         // TODO: This should be configurable. Maybe use the matrix HS server_name?
         let irc_server_name = "localhost".into();
@@ -189,47 +187,68 @@ fn main() {
 
         if let Some(acceptor) = tls_acceptor.clone() {
             // Do the TLS handshake and then set up the bridge
-            let future = setup_future
-                .and_then(move |socket| {
-                    acceptor
-                        .accept(socket)
-                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-                })
-                .map_err(move |err| {
-                    task_warn!("TLS handshake failed"; "error" => format!("{}", err));
-                })
-                .and_then(move |tls_socket| {
-                    // the Bridge::create returns a future that resolves to a Bridge object. The
-                    // Bridge object is *also* a future that we want to wait on, so we use `flatten()`
-                    bridge::Bridge::create(new_handle, cloned_url, tls_socket, irc_server_name, ctx)
-                        .map(|bridge| bridge.into_future())
-                        .flatten()
-                        .map_err(
-                            |err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)),
-                        )
-                })
-                .then(|r| {
-                    task_info!("Finished");
-                    r
-                });
+            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
+                debug!(ctx.logger.as_ref(), "Accepted connection");
+
+                let tls_socket = acceptor
+                    .accept(tcp_stream)
+                    .await
+                    .map_err(|err| {
+                        task_warn!(ctx, "TLS handshake failed"; "error" => format!("{}", err));
+                        io::Error::new(io::ErrorKind::Other, err);
+                    })
+                    .unwrap();
+
+                let mut bridge =
+                    bridge::Bridge::create(cloned_url, tls_socket, irc_server_name, ctx.clone())
+                        .await
+                        .unwrap();
+
+                // TODO: I belive this is what taskedfutures did (except it was previously spawned
+                // off inside Bridge::create). I will come back and make sure this is correct
+                // later.
+                loop {
+                    if let Err(e) = bridge.poll_irc().await {
+                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                        break;
+                    }
+                    if let Err(e) = bridge.poll_matrix().await {
+                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                        break;
+                    }
+                }
+
+                task_info!(ctx, "Finished");
+            });
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
-            handle.spawn(future);
+            //
+            // These are spawn_local due to it not requiring spawn_fut to be Send, but it could
+            // possibly be `spawn` in the future after changing trait bounds.
+            tokio::task::spawn_local(spawn_fut);
         } else {
             // Same as above except with less TLS.
-            let future = setup_future
-                .and_then(move |socket| {
-                    bridge::Bridge::create(new_handle, cloned_url, socket, irc_server_name, ctx)
-                })
-                .map(|bridge| bridge.into_future())
-                .flatten()
-                .map_err(|err| task_warn!("Unhandled IO error"; "error" => format!("{}", err)));
+            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
+                debug!(ctx.logger.as_ref(), "Accepted connection");
 
-            handle.spawn(future);
+                let mut bridge =
+                    bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
+                        .await
+                        .unwrap();
+                loop {
+                    if let Err(e) = bridge.poll_irc().await {
+                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                        break;
+                    }
+                    if let Err(e) = bridge.poll_matrix().await {
+                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                        break;
+                    }
+                }
+            });
+
+            tokio::task::spawn_local(spawn_fut);
         };
-
-        Ok(())
-    });
-    l.run(done).unwrap();
+    }
 }

@@ -14,53 +14,46 @@
 
 #![allow(unused_macros)]
 
+// $ctx in all macro arguments is of type crate::ConnectionContext
 
 macro_rules! task_log {
-    ($lvl:expr, $($args:tt)+) => {{
-        use crate::CONTEXT;
-
-        CONTEXT.with(|m| {
-            if let Some(ref ctx) = m.borrow().as_ref() {
-                log!(ctx.logger.as_ref(), $lvl, "", $($args)+)
-            } else {
-                log!(crate::DEFAULT_LOGGER, $lvl, "", $($args)+)
-            }
-        });
+    ($ctx:expr, $lvl:expr, $($args:tt)+) => {{
+        log!($ctx.logger.as_ref(), $lvl, "", $($args)+)
     }}
 }
 
 macro_rules! task_trace {
-    ($($args:tt)+) => {{
-        task_log!(::slog::Level::Trace, $($args)+);
+    ($ctx:expr, $($args:tt)+) => {{
+        task_log!($ctx, ::slog::Level::Trace, $($args)+);
     }}
 }
 
 macro_rules! task_debug {
-    ($($args:tt)+) => {{
-        task_log!(::slog::Level::Debug, $($args)+);
+    ($ctx:expr, $($args:tt)+) => {{
+        task_log!($ctx, ::slog::Level::Debug, $($args)+);
     }}
 }
 
 macro_rules! task_info {
-    ($($args:tt)+) => {{
-        task_log!(::slog::Level::Info, $($args)+);
+    ($ctx:expr, $($args:tt)+) => {{
+        task_log!($ctx, ::slog::Level::Info, $($args)+);
     }}
 }
 
 macro_rules! task_warn {
-    ($($args:tt)+) => {{
-        task_log!(::slog::Level::Warning, $($args)+);
-    }}
+    ($ctx:expr, $($args:tt)+) => {{
+        task_log!($ctx, ::slog::Level::Warning, $($args)+);
+    }};
 }
 
 macro_rules! task_error {
-    ($($args:tt)+) => {{
-        task_log!(::slog::Level::Error, $($args)+);
+    ($ctx:expr, $($args:tt)+) => {{
+        task_log!($ctx, ::slog::Level::Error, $($args)+);
     }}
 }
 
 macro_rules! task_crit {
-    ($($args:tt)+) => {{
-        task_log!(::slog::Level::Crit, $($args)+);
+    ($ctx:expr, $($args:tt)+) => {{
+        task_log!($ctx, ::slog::Level::Crit, $($args)+);
     }}
 }
