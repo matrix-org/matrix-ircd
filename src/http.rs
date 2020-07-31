@@ -19,3 +19,13 @@ impl ClientWrapper {
         self.inner.request(request)
     }
 }
+
+#[cfg(test)]
+mod send_tests {
+    fn is_send<T: Send>(_: T) {}
+    #[test]
+    fn http_client() {
+        let http = crate::http::ClientWrapper::new();
+        is_send(http);
+    }
+}

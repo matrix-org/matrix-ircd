@@ -31,7 +31,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct IrcServerConnection<S>
 where
-    S: AsyncRead + AsyncWrite,
+    S: AsyncRead + AsyncWrite + Send,
 {
     conn: Pin<Box<S>>,
     read_buffer: Vec<u8>,
@@ -43,7 +43,7 @@ where
 
 impl<S> IrcServerConnection<S>
 where
-    S: AsyncWrite + AsyncRead,
+    S: AsyncWrite + AsyncRead + Send,
 {
     pub fn new(conn: S, server_name: String, context: ConnectionContext) -> IrcServerConnection<S> {
         IrcServerConnection {
@@ -256,8 +256,12 @@ where
 
             let bytes_written = {
                 let to_write = &inner.write_buffer.get_ref()[pos..];
-                self.conn.as_mut().write(to_write).await?
+                let bytes = self.conn.as_mut().write(to_write).await?;
+                std::mem::drop(inner);
+                bytes
             };
+
+            let mut inner = self.inner.lock().unwrap();
 
             inner
                 .write_buffer
@@ -266,7 +270,7 @@ where
     }
 }
 
-impl<S: AsyncRead + AsyncWrite> Stream for IrcServerConnection<S> {
+impl<S: AsyncRead + AsyncWrite + Send> Stream for IrcServerConnection<S> {
     type Item = Result<IrcCommand, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {

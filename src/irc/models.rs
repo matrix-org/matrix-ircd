@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct Channel {

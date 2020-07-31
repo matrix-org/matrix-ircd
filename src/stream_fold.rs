@@ -19,6 +19,7 @@ use futures::task::{Context, Poll};
 use std::boxed::Box;
 use std::cell::RefCell;
 use std::pin::Pin;
+use std::sync::Mutex;
 
 /// `StreamFold` provides a way to fold over a stream and update internal state with every new value.
 ///
@@ -39,7 +40,7 @@ where
     S: Stream<Item = Result<T, V>>,
     W: StateUpdate<Result<T, V>>,
 {
-    stream: RefCell<Pin<Box<S>>>,
+    stream: Mutex<Pin<Box<S>>>,
     // The variable that is being updated with every new value from self.stream
     state: RefCell<W>,
 }
@@ -52,12 +53,12 @@ where
     pub fn new(stream: S, state: W) -> StreamFold<S, W, T, V> {
         StreamFold {
             state: RefCell::new(state),
-            stream: RefCell::new(Box::pin(stream)),
+            stream: Mutex::new(Box::pin(stream)),
         }
     }
 
     pub fn into_parts(self) -> (Pin<Box<S>>, W) {
-        (self.stream.into_inner(), self.state.into_inner())
+        (self.stream.into_inner().unwrap(), self.state.into_inner())
     }
 }
 
@@ -70,7 +71,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
-            match self.stream.borrow_mut().as_mut().poll_next(cx) {
+            match self.stream.lock().unwrap().as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
                     if self.state.borrow_mut().state_update(item) {
                         return Poll::Ready(Some(()));

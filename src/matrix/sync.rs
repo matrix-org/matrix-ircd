@@ -15,6 +15,7 @@
 use serde_json;
 
 use std::io;
+use std::sync::Mutex;
 
 use super::protocol::SyncResponse;
 
@@ -41,10 +42,16 @@ pub struct MatrixSyncClient {
 }
 
 enum RequestStatus {
-    MadeRequest(CompatResponseFut),
-    ConcatenatingResponse(Pin<Box<dyn Future<Output = Result<hyper::body::Bytes, hyper::Error>>>>),
+    MadeRequest(hyper::client::ResponseFuture),
+    ConcatenatingResponse(Pin<Box<dyn Future<Output = Result<hyper::body::Bytes, hyper::Error> > + Sync>>),
     NoRequest,
 }
+
+// TODO: remove before pr
+unsafe impl std::marker::Sync for RequestStatus {}
+
+// TODO: this should never make it to a pr
+unsafe impl std::marker::Send for RequestStatus {}
 
 impl MatrixSyncClient {
     pub fn new(base_url: &Url, access_token: String, ctx: ConnectionContext) -> MatrixSyncClient {

@@ -35,7 +35,10 @@ use std::pin::Pin;
 
 use slog::{info, trace};
 
-pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
+// TODO: remove this before pr
+pub use transport::IrcServerConnection;
+
+pub struct IrcUserConnection<S: AsyncRead + AsyncWrite + Send> {
     conn: Pin<Box<transport::IrcServerConnection<S>>>,
     pub user: String,
     pub nick: String,
@@ -119,7 +122,7 @@ struct UserNick {
 
 impl<S> IrcUserConnection<S>
 where
-    S: AsyncRead + AsyncWrite + 'static,
+    S: AsyncRead + AsyncWrite + Send + 'static,
 {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
     pub async fn await_login(
@@ -354,5 +357,30 @@ where
                 None => return Poll::Ready(Ok(None)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod send_tests {
+    fn is_send<T:Send>(_: T) {}
+    #[test]
+    fn user_nick_builder() {
+        let ctx = crate::ConnectionContext::testing_context();
+        let builder = super::UserNickBuilder::with_context(ctx);
+        is_send(builder);
+    }
+    #[test]
+    fn ref_cell_user_nick() {
+        let ctx = crate::ConnectionContext::testing_context();
+        let builder = super::UserNickBuilder::with_context(ctx);
+        let refcell = std::cell::RefCell::new(builder);
+        is_send(refcell)
+    }
+    #[test]
+    fn user_nick_builder() {
+        //let ctx = crate::ConnectionContext::testing_context();
+        //let builder = super::UserNickBuilder::with_context(ctx);
+        //let fold = crate::StreamFold::new(
+        //is_send(builder);
     }
 }

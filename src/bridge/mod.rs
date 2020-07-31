@@ -41,7 +41,7 @@ use url::Url;
 ///
 /// The `Bridge` object is a future that resolves when the IRC connection closes the session (or
 /// on unrecoverable error).
-pub struct Bridge<IS: AsyncRead + AsyncWrite + 'static> {
+pub struct Bridge<IS: AsyncRead + AsyncWrite + Send + 'static> {
     irc_conn: Pin<Box<IrcUserConnection<IS>>>,
     matrix_client: Pin<Box<MatrixClient>>,
     ctx: ConnectionContext,
@@ -316,7 +316,7 @@ struct MappingStore {
 }
 
 impl MappingStore {
-    pub fn insert_nick<S: AsyncRead + AsyncWrite + 'static>(
+    pub fn insert_nick<S: AsyncRead + AsyncWrite + Send + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         nick: String,
@@ -337,7 +337,7 @@ impl MappingStore {
         self.room_id_to_channel.get(room_id)
     }
 
-    pub async fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
+    pub async fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + Send + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         room: &MatrixRoom,
@@ -417,7 +417,7 @@ impl MappingStore {
         (channel, true)
     }
 
-    pub fn create_or_get_nick_from_matrix<S: AsyncRead + AsyncWrite + 'static>(
+    pub fn create_or_get_nick_from_matrix<S: AsyncRead + AsyncWrite + Send + 'static>(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         user_id: &str,
