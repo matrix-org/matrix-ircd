@@ -14,8 +14,11 @@
 
 use serde_json;
 
+use std::boxed::Box;
 use std::io;
+use std::ops::DerefMut;
 use std::sync::Mutex;
+use std::task::Context;
 
 use super::protocol::SyncResponse;
 
@@ -26,32 +29,25 @@ type CompatResponseFut = hyper::client::ResponseFuture;
 
 use futures::prelude::{Future, TryFuture};
 use futures::task::Poll;
-use std::task::Context;
 
 use crate::{http, ConnectionContext};
-
-use std::boxed::Box;
 
 pub struct MatrixSyncClient {
     url: Url,
     access_token: String,
     next_token: Option<String>,
     http_client: http::ClientWrapper,
-    current_sync: RequestStatus,
+    current_sync: Mutex<RequestStatus>,
     ctx: ConnectionContext,
 }
 
 enum RequestStatus {
     MadeRequest(hyper::client::ResponseFuture),
-    ConcatenatingResponse(Pin<Box<dyn Future<Output = Result<hyper::body::Bytes, hyper::Error> > + Sync>>),
+    ConcatenatingResponse(
+        Pin<Box<dyn Future<Output = Result<hyper::body::Bytes, hyper::Error>> + Send>>,
+    ),
     NoRequest,
 }
-
-// TODO: remove before pr
-unsafe impl std::marker::Sync for RequestStatus {}
-
-// TODO: this should never make it to a pr
-unsafe impl std::marker::Send for RequestStatus {}
 
 impl MatrixSyncClient {
     pub fn new(base_url: &Url, access_token: String, ctx: ConnectionContext) -> MatrixSyncClient {
@@ -60,7 +56,7 @@ impl MatrixSyncClient {
             access_token,
             next_token: None,
             http_client: http::ClientWrapper::new(),
-            current_sync: RequestStatus::NoRequest,
+            current_sync: Mutex::new(RequestStatus::NoRequest),
             ctx,
         }
     }
@@ -68,7 +64,7 @@ impl MatrixSyncClient {
     pub fn poll_sync(&mut self, cx: &mut Context<'_>) -> Poll<Result<SyncResponse, io::Error>> {
         task_trace!(self.ctx, "Polled sync");
         loop {
-            match &mut self.current_sync {
+            match &mut self.current_sync.lock().unwrap().deref_mut() {
                 // There is currently no active request to the matrix server, so we make one
                 RequestStatus::NoRequest => {
                     self.make_request();
@@ -82,7 +78,7 @@ impl MatrixSyncClient {
                         Poll::Ready(Ok(r)) => r,
                         Poll::Ready(Err(e)) => {
                             task_info!(self.ctx, "Error doing sync"; "error" => format!("{}", e));
-                            self.current_sync = RequestStatus::NoRequest;
+                            self.current_sync = Mutex::new(RequestStatus::NoRequest);
                             continue;
                         }
                         Poll::Pending => return Poll::Pending,
@@ -101,7 +97,7 @@ impl MatrixSyncClient {
                     let bytes_fut = hyper::body::to_bytes(response.into_body());
                     let pin_bytes = Box::pin(bytes_fut);
 
-                    self.current_sync = RequestStatus::ConcatenatingResponse(pin_bytes);
+                    self.current_sync = Mutex::new(RequestStatus::ConcatenatingResponse(pin_bytes));
                     continue;
                 }
 
@@ -148,7 +144,7 @@ impl MatrixSyncClient {
             .expect("request could not be built");
 
         let response = self.http_client.send_request(request);
-        self.current_sync = RequestStatus::MadeRequest(response);
+        self.current_sync = Mutex::new(RequestStatus::MadeRequest(response));
     }
 }
 

@@ -256,12 +256,8 @@ where
 
             let bytes_written = {
                 let to_write = &inner.write_buffer.get_ref()[pos..];
-                let bytes = self.conn.as_mut().write(to_write).await?;
-                std::mem::drop(inner);
-                bytes
+                self.conn.as_mut().write(to_write).await?
             };
-
-            let mut inner = self.inner.lock().unwrap();
 
             inner
                 .write_buffer

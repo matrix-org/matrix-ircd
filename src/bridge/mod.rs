@@ -337,7 +337,9 @@ impl MappingStore {
         self.room_id_to_channel.get(room_id)
     }
 
-    pub async fn create_or_get_channel_name_from_matrix<S: AsyncRead + AsyncWrite + Send + 'static>(
+    pub async fn create_or_get_channel_name_from_matrix<
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    >(
         &mut self,
         irc_server: &mut IrcUserConnection<S>,
         room: &MatrixRoom,

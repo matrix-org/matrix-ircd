@@ -167,7 +167,10 @@ async fn main() {
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
             addr
         } else {
-            debug!(log, "Could not fetch peer address from tcp stream. Bridge will not be setup");
+            debug!(
+                log,
+                "Could not fetch peer address from tcp stream. Bridge will not be setup"
+            );
             continue;
         };
 
@@ -255,7 +258,7 @@ async fn main() {
 
 #[cfg(test)]
 mod send_tests {
-    fn is_send<T:Send>(_: T) {}
+    fn is_send<T: Send>(_: T) {}
     #[test]
     fn connection_context() {
         let ctx = super::ConnectionContext::testing_context();

@@ -392,7 +392,7 @@ mod tests {
 
 #[cfg(test)]
 mod send_tests {
-    fn is_send<T:Send>(_: T) {}
+    fn is_send<T: Send>(_: T) {}
     //#[test]
     //fn matrix_client() {
     //    let ctx = crate::ConnectionContext::testing_context();
@@ -402,9 +402,9 @@ mod send_tests {
     //}
     #[test]
     fn matrix_sync() {
-
         let ctx = crate::ConnectionContext::testing_context();
-        let client = super::sync::MatrixSyncClient::new(&url::Url::parse("asd").unwrap(), "asd".into(), ctx);
+        let client =
+            super::sync::MatrixSyncClient::new(&url::Url::parse("asd").unwrap(), "asd".into(), ctx);
         is_send(client);
     }
 }
