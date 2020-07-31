@@ -241,23 +241,34 @@ where
     /// `bridge/mod.rs` take advantage of async / await.
     async fn write(&mut self) -> Result<(), io::Error> {
         loop {
-            let mut inner = self.inner.lock().unwrap();
+            // A new scope is used to make sure the MutexGuard is not alive while .await is used.
+            // This is because the std MutexGuard is !Send and will produce compiler errors.
+            let (pos, to_write) = {
+                let mut inner = self.inner.lock().unwrap();
 
-            if inner.write_buffer.get_ref().is_empty() {
-                return Ok(());
-            }
+                if inner.write_buffer.get_ref().is_empty() {
+                    return Ok(());
+                }
 
-            let pos = inner.write_buffer.position() as usize;
-            if inner.write_buffer.get_ref().len() - pos == 0 {
-                inner.write_buffer.get_mut().clear();
-                inner.write_buffer.set_position(0);
-                return Ok(());
-            }
+                let pos = inner.write_buffer.position() as usize;
+                if inner.write_buffer.get_ref().len() - pos == 0 {
+                    inner.write_buffer.get_mut().clear();
+                    inner.write_buffer.set_position(0);
+                    return Ok(());
+                }
 
-            let bytes_written = {
-                let to_write = &inner.write_buffer.get_ref()[pos..];
-                self.conn.as_mut().write(to_write).await?
+                // we clone the bytes and return them from the scope since the guard must be
+                // dropped
+                let to_write = inner.write_buffer.get_ref()[pos..].to_vec();
+                (pos, to_write)
             };
+
+            let bytes_written = self.conn.as_mut().write(&to_write).await?;
+
+            // TODO: re-locking the mutex here gives another thread time to change the underlying
+            // data. Ideally this should be a tokio mutex where MutexGuard is Send and we do not
+            // need to re-lock
+            let mut inner = self.inner.lock().unwrap();
 
             inner
                 .write_buffer

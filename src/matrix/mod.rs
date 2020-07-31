@@ -94,7 +94,7 @@ impl MatrixClient {
         password: String,
         ctx: ConnectionContext,
     ) -> Result<MatrixClient, Error> {
-        let mut http_client = http::ClientWrapper::new();
+        let http_client = http::ClientWrapper::new();
 
         let login = protocol::LoginPasswordInput {
             user,
@@ -387,24 +387,5 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(200));
 
         mock_req.assert();
-    }
-}
-
-#[cfg(test)]
-mod send_tests {
-    fn is_send<T: Send>(_: T) {}
-    //#[test]
-    //fn matrix_client() {
-    //    let ctx = crate::ConnectionContext::testing_context();
-    //    let http = crate::http::ClientWrapper::new();
-    //    let client = super::MatrixClient::new(http, "asd".parse().unwrap(), "asd".into(), "asd".into(), ctx);
-    //    is_send(client);
-    //}
-    #[test]
-    fn matrix_sync() {
-        let ctx = crate::ConnectionContext::testing_context();
-        let client =
-            super::sync::MatrixSyncClient::new(&url::Url::parse("asd").unwrap(), "asd".into(), ctx);
-        is_send(client);
     }
 }
