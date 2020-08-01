@@ -140,7 +140,7 @@ impl MatrixSyncClient {
 
         let request = hyper::Request::builder()
             .method("GET")
-            .uri(self.url.as_str().parse::<hyper::Uri>().unwrap())
+            .uri(url.as_str().parse::<hyper::Uri>().unwrap())
             .body(hyper::Body::empty())
             .expect("request could not be built");
 
