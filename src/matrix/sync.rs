@@ -16,7 +16,6 @@ use serde_json;
 
 use std::boxed::Box;
 use std::io;
-use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Mutex;
 use std::task::Context;
@@ -64,7 +63,7 @@ impl MatrixSyncClient {
         loop {
             let mut current_sync = self.current_sync.lock().unwrap();
 
-            match &mut current_sync.deref_mut() {
+            match &mut *current_sync {
                 // There is currently no active request to the matrix server, so we make one
                 RequestStatus::NoRequest => {
                     let new_request_status = self.make_request();
