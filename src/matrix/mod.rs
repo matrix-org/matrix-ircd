@@ -94,7 +94,7 @@ impl MatrixClient {
         password: String,
         ctx: ConnectionContext,
     ) -> Result<MatrixClient, Error> {
-        let mut http_client = http::ClientWrapper::new();
+        let http_client = http::ClientWrapper::new();
 
         let login = protocol::LoginPasswordInput {
             user,

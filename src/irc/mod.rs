@@ -35,7 +35,7 @@ use std::pin::Pin;
 
 use slog::{info, trace};
 
-pub struct IrcUserConnection<S: AsyncRead + AsyncWrite> {
+pub struct IrcUserConnection<S: AsyncRead + AsyncWrite + Send> {
     conn: Pin<Box<transport::IrcServerConnection<S>>>,
     pub user: String,
     pub nick: String,
@@ -119,7 +119,7 @@ struct UserNick {
 
 impl<S> IrcUserConnection<S>
 where
-    S: AsyncRead + AsyncWrite + 'static,
+    S: AsyncRead + AsyncWrite + Send + 'static,
 {
     /// Given an IO connection, discard IRC messages until we see both a USER and NICK command.
     pub async fn await_login(

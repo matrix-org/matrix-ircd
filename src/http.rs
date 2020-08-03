@@ -13,7 +13,7 @@ impl ClientWrapper {
         }
     }
     pub(crate) fn send_request(
-        &mut self,
+        &self,
         request: Request<hyper::Body>,
     ) -> hyper::client::ResponseFuture {
         self.inner.request(request)

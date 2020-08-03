@@ -167,7 +167,10 @@ async fn main() {
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
             addr
         } else {
-            debug!(log, "Could not fetch peer address from tcp stream. Bridge will not be setup");
+            debug!(
+                log,
+                "Could not fetch peer address from tcp stream. Bridge will not be setup"
+            );
             continue;
         };
 
@@ -226,7 +229,7 @@ async fn main() {
             //
             // These are spawn_local due to it not requiring spawn_fut to be Send, but it could
             // possibly be `spawn` in the future after changing trait bounds.
-            tokio::task::spawn_local(spawn_fut);
+            tokio::spawn(spawn_fut);
         } else {
             // Same as above except with less TLS.
             let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
@@ -248,7 +251,7 @@ async fn main() {
                 }
             });
 
-            tokio::task::spawn_local(spawn_fut);
+            tokio::spawn(spawn_fut);
         };
     }
 }
