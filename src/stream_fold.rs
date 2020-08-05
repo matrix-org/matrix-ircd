@@ -66,22 +66,28 @@ where
 
 impl<W, T, V, S> Future for &StreamFold<S, W, T, V>
 where
-    W: StateUpdate<Result<T, V>>,
+    W: StateUpdate<Result<T, V>> + std::fmt::Debug,
     S: Stream<Item = Result<T, V>>,
 {
     type Output = Option<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
+            println! {"StreamFold iteration: {:?}", self.state.lock().unwrap()};
+
             match self.stream.lock().unwrap().as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
                     if self.state.lock().unwrap().state_update(item) {
+                        println!("state was ready, returning");
                         return Poll::Ready(Some(()));
                     } else {
-                        return Poll::Pending;
+                        continue;
                     }
                 }
-                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(None) => {
+                    println! {"StreamFold got a none response"}
+                    return Poll::Ready(None);
+                }
                 Poll::Pending => {
                     return Poll::Pending;
                 }

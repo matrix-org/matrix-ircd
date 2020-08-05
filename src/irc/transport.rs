@@ -163,7 +163,7 @@ where
             }
 
             let start_len = self.read_buffer.len();
-            if start_len >= 2048 {
+            if start_len >= 2048*10 {
                 return Poll::Ready(Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Line too long",
@@ -284,6 +284,7 @@ impl<S: AsyncRead + AsyncWrite + Send> Stream for IrcServerConnection<S> {
         trace!(self.ctx.logger, "IRC Polled");
 
         if self.closed {
+            debug!(self.ctx.logger, "IRC is closed, returning None from IrcServerConnection");
             return Poll::Ready(None);
         }
 
@@ -298,6 +299,7 @@ impl<S: AsyncRead + AsyncWrite + Send> Stream for IrcServerConnection<S> {
         }
 
         if self.closed {
+            debug!(self.ctx.logger, "IRC was closed in IrcServerConnection::poll_read returning None from stream");
             Poll::Ready(None)
         } else {
             Poll::Pending

@@ -62,8 +62,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         irc_server_name: String,
         ctx: ConnectionContext,
     ) -> Result<Bridge<IS>, Error> {
+        debug!(ctx.logger.as_ref(),"Starting irc connection");
+
         // make individual connections
         let irc_conn = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await?;
+
+        debug!(ctx.logger.as_ref(), "successfully created the bridge irc connection");
+
         let matrix_client = MatrixClient::login(
             base_url,
             irc_conn.user.clone(),
@@ -71,6 +76,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             ctx.clone(),
         )
         .await?;
+
+        debug!(ctx.logger.as_ref(), "successfully constructed a new matrix client");
 
         // setup connections to intermediate bridge
         let mut bridge = Bridge {

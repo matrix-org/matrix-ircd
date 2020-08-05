@@ -55,6 +55,17 @@ struct UserNickBuilder {
     password: Option<String>,
 }
 
+impl std::fmt::Debug for UserNickBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserNickBuilder")
+            .field("nick", &self.nick)
+            .field("user", &self.user)
+            .field("real_name", &self.real_name)
+            .field("password", &self.password)
+            .finish()
+     }
+}
+
 impl UserNickBuilder {
     fn with_context(ctx: ConnectionContext) -> Self {
         UserNickBuilder {
@@ -89,10 +100,13 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
     fn state_update(&mut self, new_item: Result<IrcCommand, io::Error>) -> bool {
         let cmd = match new_item {
             Ok(cmd) => cmd,
-            Err(_) => return false,
+            Err(error) => {
+                debug!(self.ctx.logger, "Failed parse command: {}", error);
+                return false
+            }
         };
 
-        trace!(self.ctx.logger, "Got command"; "command" => cmd.command());
+        debug!(self.ctx.logger, "Got command"; "command" => cmd.command());
 
         match cmd {
             IrcCommand::Nick { nick } => self.nick = Some(nick),
@@ -105,7 +119,12 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
                 debug!(self.ctx.logger, "Ignore command during login"; "cmd" => c.command());
             }
         }
-        self.is_complete()
+        
+        let complete = self.is_complete();
+        println!("::::::::::::::::::::");
+        dbg!{complete};
+
+        complete
     }
 }
 
@@ -127,18 +146,25 @@ where
         stream: S,
         ctx: ConnectionContext,
     ) -> Result<IrcUserConnection<S>, io::Error> {
-        trace!(ctx.logger, "Await login");
+        debug!(ctx.logger, "Await login");
+
         let irc_conn =
             transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
+
+        debug!(ctx.logger, "IrcServerConnection created");
 
         let ctx_clone = ctx.clone();
 
         let folder =
             crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::with_context(ctx));
 
+        debug!(ctx_clone.logger, "StreamFold created");
+
         // We cant consume the future since we need to split it into the irc connection and
         // user_nick below
         (&folder).await;
+
+        debug!(ctx_clone.logger, "StreamFold finished");
 
         let (mut irc_conn, user_nick) = folder.into_parts();
 

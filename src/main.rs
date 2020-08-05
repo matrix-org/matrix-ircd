@@ -24,11 +24,9 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::task::Context;
 
 use clap::{App, Arg};
 
-use futures::future;
 use futures::stream::StreamExt;
 
 use slog::Drain;
@@ -162,9 +160,14 @@ async fn main() {
 
     info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
+
     // This is the main loop where we accept incoming *TCP* connections.
     while let Some(Ok(tcp_stream)) = socket.next().await {
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
+            debug!(
+                log,
+                "{}", format!("Got TCP stream with address: {}", addr)
+            );
             addr
         } else {
             debug!(
@@ -189,8 +192,10 @@ async fn main() {
         let cloned_url = matrix_url.clone();
 
         if let Some(acceptor) = tls_acceptor.clone() {
+            debug!(ctx.logger.as_ref(), "Using TLS acceptor");
+
             // Do the TLS handshake and then set up the bridge
-            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
+            let spawn_fut = async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
 
                 let tls_socket = acceptor
@@ -222,7 +227,7 @@ async fn main() {
                 }
 
                 task_info!(ctx, "Finished");
-            });
+            };
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
@@ -231,14 +236,19 @@ async fn main() {
             // possibly be `spawn` in the future after changing trait bounds.
             tokio::spawn(spawn_fut);
         } else {
+            debug!(ctx.logger.as_ref(), "Using non-tls connection");
+
             // Same as above except with less TLS.
-            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
+            let spawn_fut = async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
 
                 let mut bridge =
                     bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
                         .await
                         .unwrap();
+
+                debug!(ctx.logger.as_ref(), "Successfully made bridge");
+
                 loop {
                     if let Err(e) = bridge.poll_irc().await {
                         task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
@@ -249,7 +259,7 @@ async fn main() {
                         break;
                     }
                 }
-            });
+            };
 
             tokio::spawn(spawn_fut);
         };
