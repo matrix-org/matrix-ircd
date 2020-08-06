@@ -142,6 +142,7 @@ where
     fn poll_read(&mut self, cx: &mut Context) -> Poll<Result<IrcCommand, io::Error>> {
         loop {
             while let Some(pos) = self.read_buffer.iter().position(|&c| c == b'\n') {
+                trace!(self.ctx.logger, "Pulling an IRC line from the buffer");
                 let to_return = self.read_buffer.drain(..pos + 1).collect();
                 match String::from_utf8(to_return) {
                     Ok(line) => {
@@ -163,35 +164,44 @@ where
             }
 
             let start_len = self.read_buffer.len();
-            if start_len >= 2048*10 {
+            trace!(self.ctx.logger, "start_len: {}", start_len);
+
+            if start_len >= 2048 {
                 return Poll::Ready(Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Line too long",
                 )));
             }
             self.read_buffer.resize(2048, 0);
+
             match self
                 .conn
                 .as_mut()
                 .poll_read(cx, &mut self.read_buffer[start_len..])
             {
                 Poll::Ready(Ok(0)) => {
-                    debug!(self.ctx.logger, "Closed");
+                    debug!(self.ctx.logger, "Recieved EOF, Closing IRC connection");
                     self.closed = true;
                     self.read_buffer.resize(start_len, 0);
                     return Poll::Pending;
                 }
                 Poll::Ready(Ok(bytes_read)) => {
+                    trace!(self.ctx.logger, "Read {} bytes from irc connection", bytes_read);
                     self.read_buffer.resize(start_len + bytes_read, 0);
                 }
                 Poll::Ready(Err(ref e)) if e.kind() == io::ErrorKind::WouldBlock => {
+                    trace!(self.ctx.logger, "IRC connection WouldBlock error");
                     self.read_buffer.resize(start_len, 0);
                     return Poll::Pending;
                 }
                 Poll::Ready(Err(e)) => {
+                    trace!(self.ctx.logger, "IRC connection other error");
                     return Poll::Ready(Err(e));
                 }
-                Poll::Pending => return Poll::Pending,
+                Poll::Pending => {
+                    trace!(self.ctx.logger, "TCP connection pending");
+                    return Poll::Pending
+                }
             };
         }
     }
@@ -284,22 +294,25 @@ impl<S: AsyncRead + AsyncWrite + Send> Stream for IrcServerConnection<S> {
         trace!(self.ctx.logger, "IRC Polled");
 
         if self.closed {
-            debug!(self.ctx.logger, "IRC is closed, returning None from IrcServerConnection");
+            trace!(self.ctx.logger, "IRC is closed, returning None from IrcServerConnection");
             return Poll::Ready(None);
         }
-
+        
+        trace!(self.ctx.logger, "calling poll_write");
         match self.poll_write(cx)? {
             Poll::Ready(_) => (),
             Poll::Pending => return Poll::Pending,
         };
 
-        if let Poll::Ready(line) = self.poll_read(cx)? {
-            //return Ok(Async::Ready(Some(line)));
-            return Poll::Ready(Some(Ok(line)));
+        trace!(self.ctx.logger, "finished poll_write, calling poll_read");
+
+        match self.poll_read(cx)? {
+            Poll::Ready(line) => return Poll::Ready(Some(Ok(line))),
+            Poll::Pending => trace!(self.ctx.logger, "Poll::Pending was returned from poll_read")
         }
 
         if self.closed {
-            debug!(self.ctx.logger, "IRC was closed in IrcServerConnection::poll_read returning None from stream");
+            trace!(self.ctx.logger, "IRC was closed in IrcServerConnection::poll_read returning None from stream");
             Poll::Ready(None)
         } else {
             Poll::Pending
@@ -318,4 +331,65 @@ impl IrcServerConnectionInner {
             write_buffer: Cursor::new(Vec::with_capacity(1024)),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IrcServerConnection;
+    use tokio::net::{TcpListener, TcpStream};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
+    use futures::stream::StreamExt;
+    use std::task::Poll;
+    
+    #[tokio::test]
+    async fn poll_read_1() {
+        let addr : SocketAddr= "127.0.0.1:5326".parse().unwrap();
+        let mut tcp_server = TcpListener::bind(addr).await.unwrap();
+
+        let mut tcp_connection = TcpStream::connect(addr).await.unwrap();
+        tcp_connection.write_all(b"NICK test_nickname").await.unwrap();
+        tcp_connection.write_all(b"USER test_username * * :Real Name").await.unwrap();
+        std::mem::drop(tcp_connection);
+
+        let ctx = crate::ConnectionContext::testing_context();
+
+        let (mut recv, _) : (TcpStream, _) = tcp_server.accept().await.unwrap();
+        //let recv = std::boxed::Box::pin(&mut recv);
+        let recv = std::pin::Pin::new(&mut recv);
+
+        // sample IRC commands from irc/protocol.rs
+        
+        let mut buff = String::new();
+        let mut vec = vec![];
+        dbg!{futures::future::lazy(|x| AsyncRead::poll_read(recv, x, vec.as_mut_slice())).await};
+        dbg!{vec};
+
+        panic!{"asd"};
+
+        //let mut irc = IrcServerConnection::new(recv, "Sample Server Name".into(), ctx);
+
+        //// limit the number of times the loop can run so the test has a finite time to finish
+        //let mut counter = 0;
+
+
+        //loop {
+        //    let fut = futures::future::lazy(|x| irc.poll_read(x));
+        //    match fut.await {
+        //        Poll::Ready(Ok(_))=> println!{"got command"},
+        //        Poll::Ready(Err(_)) => println!{"got error"},
+        //        Poll::Pending => ()
+        //    }
+        //    if irc.closed == true {
+        //        break
+        //    }
+
+        //    if counter > 200 {
+        //        panic!{"Was not able to parse all items"}
+        //    }
+        //    else { counter += 1 }
+        //}
+
+    }
+
 }

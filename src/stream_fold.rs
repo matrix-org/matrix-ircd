@@ -72,15 +72,21 @@ where
     type Output = Option<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        loop {
-            println! {"StreamFold iteration: {:?}", self.state.lock().unwrap()};
+        // Since these are only used for interior mutability and we dont give out references to
+        // these fields we can be sure that this will not deadlock
+        let mut stream = self.stream.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
 
-            match self.stream.lock().unwrap().as_mut().poll_next(cx) {
+        loop {
+            println! {"StreamFold iteration: {:?}", state} 
+
+            match stream.as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
-                    if self.state.lock().unwrap().state_update(item) {
+                    if state.state_update(item) {
                         println!("state was ready, returning");
                         return Poll::Ready(Some(()));
                     } else {
+                        println!("state was pending, continuing");
                         continue;
                     }
                 }
@@ -98,4 +104,82 @@ where
 
 pub trait StateUpdate<Z> {
     fn state_update(&mut self, new_item: Z) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StateUpdate, StreamFold};
+    use tokio::sync::mpsc;
+
+    #[derive(Debug)]
+    enum Parts {
+        A,
+        B,
+        C,
+        D,
+        End
+    }
+
+    #[derive(Default, Debug)]
+    struct PartsCollected {
+        a: Option<()>,
+        b: Option<()>,
+        c: Option<()>,
+        d: Option<()>,
+    }
+    impl PartsCollected {
+        fn all_some(&self) -> bool {
+            self.a.is_some() && self.b.is_some() && self.c.is_some() && self.d.is_some()
+        }
+    }
+    impl StateUpdate<Result<Parts, ()>> for PartsCollected {
+        fn state_update(&mut self, new_item: Result<Parts, ()>) -> bool {
+            match new_item.unwrap() {
+                Parts::A => self.a = Some(()),
+                Parts::B => self.b = Some(()),
+                Parts::C => self.c = Some(()),
+                Parts::D => self.d = Some(()),
+                Parts::End => return true
+            }
+            self.all_some()
+        }
+    }
+
+    // Sends all four of the required parts to the PartsCollected struct. Does not include a 
+    // Parts::End since we expect the state to complete without it
+    #[tokio::test]
+    async fn good_fold() {
+        let (mut tx, rx) = mpsc::channel(10);
+        tx.send(Ok(Parts::A)).await.unwrap();
+        tx.send(Ok(Parts::B)).await.unwrap();
+        tx.send(Ok(Parts::C)).await.unwrap();
+        tx.send(Ok(Parts::D)).await.unwrap();
+        let stream_fold = StreamFold::new(rx, PartsCollected::default());
+        (&stream_fold).await;
+        let (_, state) = stream_fold.into_parts();
+
+        assert_eq!(state.all_some(), true)
+        //
+    }
+
+    // Only send 3/4 parts to the PartsCollected state, and then send the EOF. The returned state
+    // should be incomplete
+    #[tokio::test]
+    async fn incomplete_fold() {
+        let (mut tx, rx) = mpsc::channel(10);
+
+        // we only send 3 of the 4 parts to the fold
+        tx.send(Ok(Parts::A)).await.unwrap();
+        tx.send(Ok(Parts::B)).await.unwrap();
+        tx.send(Ok(Parts::C)).await.unwrap();
+
+        // Simulate an EOF
+        tx.send(Ok(Parts::End)).await.unwrap();
+
+        let stream_fold = StreamFold::new(rx, PartsCollected::default());
+        (&stream_fold).await;
+        let (_, state) = stream_fold.into_parts();
+
+        assert_eq!(state.all_some(), false)
+    }
 }

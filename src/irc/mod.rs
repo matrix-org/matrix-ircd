@@ -79,12 +79,27 @@ impl UserNickBuilder {
 }
 
 impl UserNickBuilder {
-    fn to_user_nick(self) -> UserNick {
-        UserNick {
-            nick: self.nick.unwrap(),
-            user: self.user.unwrap(),
-            real_name: self.real_name.unwrap(),
-            password: self.password,
+    fn to_user_nick(self) -> Result<UserNick, io::Error> {
+        if self.is_complete() {
+            debug!(self.ctx.logger.as_ref(), "UserNickBuilder is marked as complete, converting to UserNick");
+
+            Ok(UserNick {
+                nick: self.nick.unwrap(),
+                user: self.user.unwrap(),
+                real_name: self.real_name.unwrap(),
+                password: self.password,
+            })
+        }
+        else {
+            warn!(self.ctx.logger.as_ref(), "UserNickBuilder that was returned from StreamFold was not complete");
+
+            Err(
+                io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Unable to build a UserNick from the TCP stream"
+                )
+            )
+
         }
     }
 
@@ -164,11 +179,11 @@ where
         // user_nick below
         (&folder).await;
 
-        debug!(ctx_clone.logger, "StreamFold finished");
+        debug!(ctx_clone.logger, "StreamFold finished, now splitting into individual parts");
 
         let (mut irc_conn, user_nick) = folder.into_parts();
 
-        let irc_user = user_nick.to_user_nick();
+        let irc_user = user_nick.to_user_nick()?;
 
         info!(ctx_clone.logger, "got nick and user");
 

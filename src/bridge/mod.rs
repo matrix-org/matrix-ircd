@@ -65,7 +65,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         debug!(ctx.logger.as_ref(),"Starting irc connection");
 
         // make individual connections
-        let irc_conn = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await?;
+        let irc_conn = match IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await {
+            Ok(conn) => conn,
+            Err(err) => {
+                warn!(ctx.logger.as_ref(), "IrcUserConnection could not be created. Error: {}", err.to_string());
+                return Err(Error::from(err))
+            }
+        };
 
         debug!(ctx.logger.as_ref(), "successfully created the bridge irc connection");
 
