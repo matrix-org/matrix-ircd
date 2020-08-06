@@ -250,6 +250,8 @@ async fn main() {
                 debug!(ctx.logger.as_ref(), "Successfully made bridge");
 
                 loop {
+                    debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
+
                     if let Err(e) = bridge.poll_irc().await {
                         task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
                         break;

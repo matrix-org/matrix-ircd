@@ -85,7 +85,7 @@ impl MatrixSyncClient {
                     };
 
                     // check response code to make sure the response was 200 Ok
-                    if response.status() == hyper::StatusCode::OK {
+                    if response.status() != hyper::StatusCode::OK {
                         return Poll::Ready(Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!("Sync returned {}", response.status().as_u16()),

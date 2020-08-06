@@ -24,6 +24,7 @@ tokio = { version = "0.2.21", features=["full"] }
 hyper = "0.13.6"
 native-tls = "0.2.4"
 tokio-native-tls = "0.1.0"
+hyper-tls = "0.4.3"
 
 [dependencies.openssl]
 version = "0.10.0"
