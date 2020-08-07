@@ -63,6 +63,9 @@ pub enum IrcCommand {
     Who {
         matches: String,
     },
+    Away {
+        message: String,
+    },
 }
 
 impl IrcCommand {
@@ -146,6 +149,18 @@ impl IrcCommand {
                 .next()
                 .map(|arg| IrcCommand::Who { matches: arg }),
             Command::Numeric { .. } | Command::Unknown => None,
+            Command::Away => {
+                let mut it = irc_line.args.into_iter();
+                if let Some(message) = it.next() {
+                    Some(IrcCommand::Away {
+                        message
+                    })
+                } else {
+                    Some(IrcCommand::Away {
+                        message: String::new()
+                    })
+                }
+            }
         }
     }
 
@@ -163,6 +178,7 @@ impl IrcCommand {
             IrcCommand::PrivMsg { .. } => Command::PrivMsg,
             IrcCommand::Topic { .. } => Command::Topic,
             IrcCommand::Who { .. } => Command::Who,
+            IrcCommand::Away { .. } => Command::Away,
         }
     }
 }
@@ -190,6 +206,7 @@ pub enum Command {
     PrivMsg,
     Topic,
     Who,
+    Away,
     Numeric { code: u16, string: [u8; 3] },
     Unknown,
 }
@@ -209,6 +226,7 @@ impl<'a> From<&'a str> for Command {
             "PRIVMSG" => Command::PrivMsg,
             "TOPIC" => Command::Topic,
             "WHO" => Command::Who,
+            "AWAY" => Command::Away,
             _ => {
                 if cmd.len() == 3 {
                     if let Ok(c) = cmd.parse() {
@@ -242,6 +260,7 @@ impl From<String> for Command {
             "PRIVMSG" => return Command::PrivMsg,
             "TOPIC" => return Command::Topic,
             "WHO" => return Command::Who,
+            "AWAY" => return Command::Away,
             _ => {}
         }
 
@@ -275,6 +294,7 @@ impl Command {
             Command::PrivMsg => "PRIVMSG",
             Command::Topic => "TOPIC",
             Command::Who => "WHO",
+            Command::Away => "AWAY",
             Command::Numeric { ref string, .. } => str::from_utf8(string).expect("Numeric code"),
             Command::Unknown => "<UNKNOWN>",
         }
@@ -369,6 +389,8 @@ pub fn parse_irc_line(line: &str) -> Option<IrcLine> {
 pub enum Numeric {
     RplWelcome = 1,
     RplChannelmodeis = 324,
+    RplUnaway = 305,
+    RplNowaway = 306,
     RplTopic = 332,
     RplEndofwho = 315,
     RplWhoreply = 352,
@@ -392,6 +414,8 @@ impl<'a> From<Numeric> for &'a str {
     fn from(s: Numeric) -> &'a str {
         match s {
             Numeric::RplWelcome => "001",
+            Numeric::RplUnaway => "305",
+            Numeric::RplNowaway => "306",
             Numeric::RplChannelmodeis => "324",
             Numeric::RplTopic => "332",
             Numeric::RplEndofwho => "315",

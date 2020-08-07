@@ -157,6 +157,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
                 // TODO: Handle failure of join. Ensure that joining map is cleared.
                 self.spawn(join_future);
             }
+            IrcCommand::Away { message } => {
+                if message.is_empty() {
+                    self.irc_conn.unaway();
+                } else {
+                    self.irc_conn.away();
+                }
+            }
             // TODO: Handle PART
             c => {
                 warn!(self.ctx.logger, "Ignoring IRC command"; "command" => c.command());
