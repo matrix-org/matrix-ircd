@@ -120,6 +120,7 @@ impl MatrixSyncClient {
 
                     task_trace!(self.ctx, "Got sync response"; "next_token" => sync_response.next_batch.clone());
                     self.next_token = Some(sync_response.next_batch.clone());
+                    *current_sync = RequestStatus::NoRequest;
                     return Poll::Ready(Ok(sync_response));
                 }
             };

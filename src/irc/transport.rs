@@ -67,6 +67,10 @@ where
                 v.extend_from_slice(line.as_bytes());
                 v.push(b'\n');
             }
+
+            if let Some(ref waker) = inner.waker {
+                waker.wake_by_ref()
+            }
         }
 
         let _ = self.write().await;
@@ -148,7 +152,6 @@ where
                     Ok(line) => {
                         let line = line.trim_end().to_string();
                         if let Ok(irc_line) = line.parse() {
-                            trace!(self.ctx.logger, "Got IRC line"; "line" => line);
                             return Poll::Ready(Ok(irc_line));
                         } else {
                             warn!(self.ctx.logger, "Invalid IRC line"; "line" => line);
@@ -164,7 +167,8 @@ where
             }
 
             let start_len = self.read_buffer.len();
-            trace!(self.ctx.logger, "start_len: {}", start_len);
+
+            trace!(self.ctx.logger, "current buffer length: {}", start_len);
 
             if start_len >= 2048 {
                 return Poll::Ready(Err(io::Error::new(
@@ -186,7 +190,11 @@ where
                     return Poll::Pending;
                 }
                 Poll::Ready(Ok(bytes_read)) => {
-                    trace!(self.ctx.logger, "Read {} bytes from irc connection", bytes_read);
+                    trace!(
+                        self.ctx.logger,
+                        "Read {} bytes from irc connection",
+                        bytes_read
+                    );
                     self.read_buffer.resize(start_len + bytes_read, 0);
                 }
                 Poll::Ready(Err(ref e)) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -200,7 +208,8 @@ where
                 }
                 Poll::Pending => {
                     trace!(self.ctx.logger, "TCP connection pending");
-                    return Poll::Pending
+                    self.read_buffer.resize(start_len, 0);
+                    return Poll::Pending;
                 }
             };
         }
@@ -212,6 +221,10 @@ where
     fn poll_write(&mut self, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         loop {
             let mut inner = self.inner.lock().unwrap();
+
+            if inner.waker.is_none() {
+                inner.waker = Some(cx.waker().clone())
+            }
 
             if inner.write_buffer.get_ref().is_empty() {
                 return Poll::Ready(Ok(()));
@@ -232,6 +245,11 @@ where
                     Poll::Pending => return Poll::Pending,
                 }
             };
+
+            debug!(
+                self.ctx.logger,
+                "Wrote {} bytes in poll_write", bytes_written
+            );
 
             inner
                 .write_buffer
@@ -294,25 +312,31 @@ impl<S: AsyncRead + AsyncWrite + Send> Stream for IrcServerConnection<S> {
         trace!(self.ctx.logger, "IRC Polled");
 
         if self.closed {
-            trace!(self.ctx.logger, "IRC is closed, returning None from IrcServerConnection");
+            trace!(
+                self.ctx.logger,
+                "IRC is closed, returning None from IrcServerConnection"
+            );
             return Poll::Ready(None);
         }
-        
+
         trace!(self.ctx.logger, "calling poll_write");
         match self.poll_write(cx)? {
             Poll::Ready(_) => (),
             Poll::Pending => return Poll::Pending,
         };
 
-        trace!(self.ctx.logger, "finished poll_write, calling poll_read");
+        trace!(self.ctx.logger, "calling poll_read");
 
         match self.poll_read(cx)? {
             Poll::Ready(line) => return Poll::Ready(Some(Ok(line))),
-            Poll::Pending => trace!(self.ctx.logger, "Poll::Pending was returned from poll_read")
+            Poll::Pending => trace!(self.ctx.logger, "Poll::Pending was returned from poll_read"),
         }
 
         if self.closed {
-            trace!(self.ctx.logger, "IRC was closed in IrcServerConnection::poll_read returning None from stream");
+            trace!(
+                self.ctx.logger,
+                "IRC was closed in IrcServerConnection::poll_read returning None from stream"
+            );
             Poll::Ready(None)
         } else {
             Poll::Pending
@@ -323,73 +347,14 @@ impl<S: AsyncRead + AsyncWrite + Send> Stream for IrcServerConnection<S> {
 #[derive(Debug, Clone)]
 struct IrcServerConnectionInner {
     write_buffer: Cursor<Vec<u8>>,
+    waker: Option<std::task::Waker>,
 }
 
 impl IrcServerConnectionInner {
     pub fn new() -> IrcServerConnectionInner {
         IrcServerConnectionInner {
             write_buffer: Cursor::new(Vec::with_capacity(1024)),
+            waker: None,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::IrcServerConnection;
-    use tokio::net::{TcpListener, TcpStream};
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    use tokio::io::{AsyncWrite, AsyncWriteExt, AsyncRead, AsyncReadExt};
-    use futures::stream::StreamExt;
-    use std::task::Poll;
-    
-    #[tokio::test]
-    async fn poll_read_1() {
-        let addr : SocketAddr= "127.0.0.1:5326".parse().unwrap();
-        let mut tcp_server = TcpListener::bind(addr).await.unwrap();
-
-        let mut tcp_connection = TcpStream::connect(addr).await.unwrap();
-        tcp_connection.write_all(b"NICK test_nickname").await.unwrap();
-        tcp_connection.write_all(b"USER test_username * * :Real Name").await.unwrap();
-        std::mem::drop(tcp_connection);
-
-        let ctx = crate::ConnectionContext::testing_context();
-
-        let (mut recv, _) : (TcpStream, _) = tcp_server.accept().await.unwrap();
-        //let recv = std::boxed::Box::pin(&mut recv);
-        let recv = std::pin::Pin::new(&mut recv);
-
-        // sample IRC commands from irc/protocol.rs
-        
-        let mut buff = String::new();
-        let mut vec = vec![];
-        dbg!{futures::future::lazy(|x| AsyncRead::poll_read(recv, x, vec.as_mut_slice())).await};
-        dbg!{vec};
-
-        panic!{"asd"};
-
-        //let mut irc = IrcServerConnection::new(recv, "Sample Server Name".into(), ctx);
-
-        //// limit the number of times the loop can run so the test has a finite time to finish
-        //let mut counter = 0;
-
-
-        //loop {
-        //    let fut = futures::future::lazy(|x| irc.poll_read(x));
-        //    match fut.await {
-        //        Poll::Ready(Ok(_))=> println!{"got command"},
-        //        Poll::Ready(Err(_)) => println!{"got error"},
-        //        Poll::Pending => ()
-        //    }
-        //    if irc.closed == true {
-        //        break
-        //    }
-
-        //    if counter > 200 {
-        //        panic!{"Was not able to parse all items"}
-        //    }
-        //    else { counter += 1 }
-        //}
-
-    }
-
 }

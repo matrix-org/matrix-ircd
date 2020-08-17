@@ -160,14 +160,10 @@ async fn main() {
 
     info!(log, "Started listening"; "addr" => bind_addr, "tls" => tls);
 
-
     // This is the main loop where we accept incoming *TCP* connections.
     while let Some(Ok(tcp_stream)) = socket.next().await {
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
-            debug!(
-                log,
-                "{}", format!("Got TCP stream with address: {}", addr)
-            );
+            debug!(log, "{}", format!("Got TCP stream with address: {}", addr));
             addr
         } else {
             debug!(
@@ -244,22 +240,26 @@ async fn main() {
 
                 let mut bridge =
                     bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
-                        .await
-                        .unwrap();
+                        .await;
 
-                debug!(ctx.logger.as_ref(), "Successfully made bridge");
+                match bridge {
+                    Ok(mut bridge) => {
+                        debug!(ctx.logger.as_ref(), "Successfully made bridge");
 
-                loop {
-                    debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
+                        loop {
+                            debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
 
-                    if let Err(e) = bridge.poll_irc().await {
-                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
-                        break;
+                            if let Err(e) = bridge.poll_irc().await {
+                                task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                                break;
+                            }
+                            if let Err(e) = bridge.poll_matrix().await {
+                                task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                                break;
+                            }
+                        }
                     }
-                    if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                        break;
-                    }
+                    Err(e) => (),
                 }
             };
 

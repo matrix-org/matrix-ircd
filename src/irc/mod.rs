@@ -63,7 +63,7 @@ impl std::fmt::Debug for UserNickBuilder {
             .field("real_name", &self.real_name)
             .field("password", &self.password)
             .finish()
-     }
+    }
 }
 
 impl UserNickBuilder {
@@ -81,7 +81,10 @@ impl UserNickBuilder {
 impl UserNickBuilder {
     fn to_user_nick(self) -> Result<UserNick, io::Error> {
         if self.is_complete() {
-            debug!(self.ctx.logger.as_ref(), "UserNickBuilder is marked as complete, converting to UserNick");
+            debug!(
+                self.ctx.logger.as_ref(),
+                "UserNickBuilder is marked as complete, converting to UserNick"
+            );
 
             Ok(UserNick {
                 nick: self.nick.unwrap(),
@@ -89,17 +92,16 @@ impl UserNickBuilder {
                 real_name: self.real_name.unwrap(),
                 password: self.password,
             })
-        }
-        else {
-            warn!(self.ctx.logger.as_ref(), "UserNickBuilder that was returned from StreamFold was not complete");
+        } else {
+            warn!(
+                self.ctx.logger.as_ref(),
+                "UserNickBuilder that was returned from StreamFold was not complete"
+            );
 
-            Err(
-                io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "Unable to build a UserNick from the TCP stream"
-                )
-            )
-
+            Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Unable to build a UserNick from the TCP stream",
+            ))
         }
     }
 
@@ -117,7 +119,7 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
             Ok(cmd) => cmd,
             Err(error) => {
                 debug!(self.ctx.logger, "Failed parse command: {}", error);
-                return false
+                return false;
             }
         };
 
@@ -134,10 +136,8 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
                 debug!(self.ctx.logger, "Ignore command during login"; "cmd" => c.command());
             }
         }
-        
+
         let complete = self.is_complete();
-        println!("::::::::::::::::::::");
-        dbg!{complete};
 
         complete
     }
@@ -179,7 +179,10 @@ where
         // user_nick below
         (&folder).await;
 
-        debug!(ctx_clone.logger, "StreamFold finished, now splitting into individual parts");
+        debug!(
+            ctx_clone.logger,
+            "StreamFold finished, now splitting into individual parts"
+        );
 
         let (mut irc_conn, user_nick) = folder.into_parts();
 

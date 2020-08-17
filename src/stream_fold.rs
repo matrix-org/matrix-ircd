@@ -78,20 +78,15 @@ where
         let mut state = self.state.lock().unwrap();
 
         loop {
-            println! {"StreamFold iteration: {:?}", state} 
-
             match stream.as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => {
                     if state.state_update(item) {
-                        println!("state was ready, returning");
                         return Poll::Ready(Some(()));
                     } else {
-                        println!("state was pending, continuing");
                         continue;
                     }
                 }
                 Poll::Ready(None) => {
-                    println! {"StreamFold got a none response"}
                     return Poll::Ready(None);
                 }
                 Poll::Pending => {
@@ -117,7 +112,7 @@ mod tests {
         B,
         C,
         D,
-        End
+        End,
     }
 
     #[derive(Default, Debug)]
@@ -139,13 +134,13 @@ mod tests {
                 Parts::B => self.b = Some(()),
                 Parts::C => self.c = Some(()),
                 Parts::D => self.d = Some(()),
-                Parts::End => return true
+                Parts::End => return true,
             }
             self.all_some()
         }
     }
 
-    // Sends all four of the required parts to the PartsCollected struct. Does not include a 
+    // Sends all four of the required parts to the PartsCollected struct. Does not include a
     // Parts::End since we expect the state to complete without it
     #[tokio::test]
     async fn good_fold() {
@@ -159,7 +154,6 @@ mod tests {
         let (_, state) = stream_fold.into_parts();
 
         assert_eq!(state.all_some(), true)
-        //
     }
 
     // Only send 3/4 parts to the PartsCollected state, and then send the EOF. The returned state

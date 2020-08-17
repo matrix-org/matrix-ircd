@@ -62,18 +62,26 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         irc_server_name: String,
         ctx: ConnectionContext,
     ) -> Result<Bridge<IS>, Error> {
-        debug!(ctx.logger.as_ref(),"Starting irc connection");
+        debug!(ctx.logger.as_ref(), "Starting irc connection");
 
         // make individual connections
-        let irc_conn = match IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await {
-            Ok(conn) => conn,
-            Err(err) => {
-                warn!(ctx.logger.as_ref(), "IrcUserConnection could not be created. Error: {}", err.to_string());
-                return Err(Error::from(err))
-            }
-        };
+        let irc_conn =
+            match IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    warn!(
+                        ctx.logger.as_ref(),
+                        "IrcUserConnection could not be created. Error: {}",
+                        err.to_string()
+                    );
+                    return Err(Error::from(err));
+                }
+            };
 
-        debug!(ctx.logger.as_ref(), "successfully created the bridge irc connection");
+        debug!(
+            ctx.logger.as_ref(),
+            "successfully created the bridge irc connection"
+        );
 
         let matrix_client = MatrixClient::login(
             base_url,
@@ -83,7 +91,10 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         )
         .await?;
 
-        debug!(ctx.logger.as_ref(), "successfully constructed a new matrix client");
+        debug!(
+            ctx.logger.as_ref(),
+            "successfully constructed a new matrix client"
+        );
 
         // setup connections to intermediate bridge
         let mut bridge = Bridge {
