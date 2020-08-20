@@ -84,7 +84,7 @@ impl MatrixSyncClient {
                         Poll::Pending => return Poll::Pending,
                     };
 
-                    // check response code to make sure the response was 200 Ok
+                    // error if the response code was not 200 OK
                     if response.status() != hyper::StatusCode::OK {
                         return Poll::Ready(Err(io::Error::new(
                             io::ErrorKind::Other,

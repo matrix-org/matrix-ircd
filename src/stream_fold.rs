@@ -66,7 +66,7 @@ where
 
 impl<W, T, V, S> Future for &StreamFold<S, W, T, V>
 where
-    W: StateUpdate<Result<T, V>> + std::fmt::Debug,
+    W: StateUpdate<Result<T, V>>,
     S: Stream<Item = Result<T, V>>,
 {
     type Output = Option<()>;

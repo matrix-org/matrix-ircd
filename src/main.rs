@@ -240,26 +240,20 @@ async fn main() {
 
                 let mut bridge =
                     bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
-                        .await;
+                        .await
+                        .unwrap();
 
-                match bridge {
-                    Ok(mut bridge) => {
-                        debug!(ctx.logger.as_ref(), "Successfully made bridge");
+                loop {
+                    debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
 
-                        loop {
-                            debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
-
-                            if let Err(e) = bridge.poll_irc().await {
-                                task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
-                                break;
-                            }
-                            if let Err(e) = bridge.poll_matrix().await {
-                                task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                                break;
-                            }
-                        }
+                    if let Err(e) = bridge.poll_irc().await {
+                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                        break;
                     }
-                    Err(e) => (),
+                    if let Err(e) = bridge.poll_matrix().await {
+                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                        break;
+                    }
                 }
             };
 
