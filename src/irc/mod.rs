@@ -55,6 +55,17 @@ struct UserNickBuilder {
     password: Option<String>,
 }
 
+impl std::fmt::Debug for UserNickBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserNickBuilder")
+            .field("nick", &self.nick)
+            .field("user", &self.user)
+            .field("real_name", &self.real_name)
+            .field("password", &self.password)
+            .finish()
+    }
+}
+
 impl UserNickBuilder {
     fn with_context(ctx: ConnectionContext) -> Self {
         UserNickBuilder {
@@ -68,12 +79,29 @@ impl UserNickBuilder {
 }
 
 impl UserNickBuilder {
-    fn to_user_nick(self) -> UserNick {
-        UserNick {
-            nick: self.nick.unwrap(),
-            user: self.user.unwrap(),
-            real_name: self.real_name.unwrap(),
-            password: self.password,
+    fn to_user_nick(self) -> Result<UserNick, io::Error> {
+        if self.is_complete() {
+            debug!(
+                self.ctx.logger.as_ref(),
+                "UserNickBuilder is marked as complete, converting to UserNick"
+            );
+
+            Ok(UserNick {
+                nick: self.nick.unwrap(),
+                user: self.user.unwrap(),
+                real_name: self.real_name.unwrap(),
+                password: self.password,
+            })
+        } else {
+            warn!(
+                self.ctx.logger.as_ref(),
+                "UserNickBuilder that was returned from StreamFold was not complete"
+            );
+
+            Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Unable to build a UserNick from the TCP stream",
+            ))
         }
     }
 
@@ -89,10 +117,13 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
     fn state_update(&mut self, new_item: Result<IrcCommand, io::Error>) -> bool {
         let cmd = match new_item {
             Ok(cmd) => cmd,
-            Err(_) => return false,
+            Err(error) => {
+                debug!(self.ctx.logger, "Failed parse command: {}", error);
+                return false;
+            }
         };
 
-        trace!(self.ctx.logger, "Got command"; "command" => cmd.command());
+        debug!(self.ctx.logger, "Got command"; "command" => cmd.command());
 
         match cmd {
             IrcCommand::Nick { nick } => self.nick = Some(nick),
@@ -105,7 +136,10 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
                 debug!(self.ctx.logger, "Ignore command during login"; "cmd" => c.command());
             }
         }
-        self.is_complete()
+
+        let complete = self.is_complete();
+
+        complete
     }
 }
 
@@ -127,22 +161,32 @@ where
         stream: S,
         ctx: ConnectionContext,
     ) -> Result<IrcUserConnection<S>, io::Error> {
-        trace!(ctx.logger, "Await login");
+        debug!(ctx.logger, "Await login");
+
         let irc_conn =
             transport::IrcServerConnection::new(stream, server_name.clone(), ctx.clone());
+
+        debug!(ctx.logger, "IrcServerConnection created");
 
         let ctx_clone = ctx.clone();
 
         let folder =
             crate::stream_fold::StreamFold::new(irc_conn, UserNickBuilder::with_context(ctx));
 
+        debug!(ctx_clone.logger, "StreamFold created");
+
         // We cant consume the future since we need to split it into the irc connection and
         // user_nick below
         (&folder).await;
 
+        debug!(
+            ctx_clone.logger,
+            "StreamFold finished, now splitting into individual parts"
+        );
+
         let (mut irc_conn, user_nick) = folder.into_parts();
 
-        let irc_user = user_nick.to_user_nick();
+        let irc_user = user_nick.to_user_nick()?;
 
         info!(ctx_clone.logger, "got nick and user");
 

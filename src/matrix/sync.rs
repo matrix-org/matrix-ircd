@@ -84,8 +84,8 @@ impl MatrixSyncClient {
                         Poll::Pending => return Poll::Pending,
                     };
 
-                    // check response code to make sure the response was 200 Ok
-                    if response.status() == hyper::StatusCode::OK {
+                    // error if the response code was not 200 OK
+                    if response.status() != hyper::StatusCode::OK {
                         return Poll::Ready(Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!("Sync returned {}", response.status().as_u16()),
@@ -120,6 +120,7 @@ impl MatrixSyncClient {
 
                     task_trace!(self.ctx, "Got sync response"; "next_token" => sync_response.next_batch.clone());
                     self.next_token = Some(sync_response.next_batch.clone());
+                    *current_sync = RequestStatus::NoRequest;
                     return Poll::Ready(Ok(sync_response));
                 }
             };
