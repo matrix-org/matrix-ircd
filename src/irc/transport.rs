@@ -69,7 +69,7 @@ where
             }
 
             if let Some(ref waker) = inner.waker {
-                waker.wake_by_ref()
+                waker.wake_by_ref();
             }
         }
 
@@ -223,7 +223,7 @@ where
             let mut inner = self.inner.lock().unwrap();
 
             if inner.waker.is_none() {
-                inner.waker = Some(cx.waker().clone())
+                inner.waker = Some(cx.waker().clone());
             }
 
             if inner.write_buffer.get_ref().is_empty() {
