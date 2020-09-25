@@ -137,9 +137,7 @@ impl crate::stream_fold::StateUpdate<Result<IrcCommand, io::Error>> for UserNick
             }
         }
 
-        let complete = self.is_complete();
-
-        complete
+        self.is_complete()
     }
 }
 

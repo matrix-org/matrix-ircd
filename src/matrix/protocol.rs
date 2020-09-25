@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncResponse {
@@ -102,7 +101,6 @@ pub struct RoomSendResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn sync_response() {

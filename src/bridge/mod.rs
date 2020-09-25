@@ -148,7 +148,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                         response
                     } else {
                         // TODO: log this
-                        return ();
+                        return;
                     };
 
                 let room_id = join_future.room_id;
@@ -211,7 +211,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         };
 
         if let Some(attempt_channel) = self.joining_map.remove(room_id) {
-            if &attempt_channel != &channel {
+            if attempt_channel != channel {
                 self.irc_conn
                     .write_redirect_join(&attempt_channel, &channel)
                     .await;
@@ -350,7 +350,7 @@ impl MappingStore {
             .insert(user_id.clone(), nick.clone());
         self.nick_matrix_uid.insert(nick.clone(), user_id.clone());
 
-        irc_server.create_user(nick.clone(), user_id.into());
+        irc_server.create_user(nick, user_id);
     }
 
     pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&String> {

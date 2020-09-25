@@ -28,8 +28,6 @@ use std::task::Context;
 use url::percent_encoding::{percent_encode, PATH_SEGMENT_ENCODE_SET};
 use url::Url;
 
-use serde_json;
-
 use rand::{thread_rng, Rng};
 
 use crate::http;
