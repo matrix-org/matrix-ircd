@@ -58,6 +58,7 @@ pub struct ConnectionContext {
     logger: Arc<slog::Logger>,
     peer_addr: SocketAddr,
 }
+
 impl ConnectionContext {
     /// Method for easily constructing a context in a test. This constructor should not be used
     /// outside of a testing function
@@ -208,19 +209,7 @@ async fn main() {
                         .await
                         .unwrap();
 
-                // TODO: I belive this is what taskedfutures did (except it was previously spawned
-                // off inside Bridge::create). I will come back and make sure this is correct
-                // later.
-                loop {
-                    if let Err(e) = bridge.poll_irc().await {
-                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                    if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                }
+                bridge.run(&ctx).await;
 
                 task_info!(ctx, "Finished");
             };
@@ -243,18 +232,7 @@ async fn main() {
                         .await
                         .unwrap();
 
-                loop {
-                    debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
-
-                    if let Err(e) = bridge.poll_irc().await {
-                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                    if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                }
+                bridge.run(&ctx).await;
             };
 
             tokio::spawn(spawn_fut);

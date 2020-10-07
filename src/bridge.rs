@@ -281,7 +281,22 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    pub async fn poll_irc(&mut self) -> Result<(), io::Error> {
+    pub async fn run(&mut self, ctx: &ConnectionContext) {
+        loop {
+            debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
+
+            if let Err(e) = self.poll_irc().await {
+                task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                break;
+            }
+            if let Err(e) = self.poll_matrix().await {
+                task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                break;
+            }
+        }
+    }
+
+    async fn poll_irc(&mut self) -> Result<(), io::Error> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
         if self.is_first_sync {
@@ -303,7 +318,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    pub async fn poll_matrix(&mut self) -> Result<(), Error> {
+    async fn poll_matrix(&mut self) -> Result<(), Error> {
         while let Some(response) = self.matrix_client.as_mut().next().await {
             let response = response?;
             self.handle_sync_response(response).await;
