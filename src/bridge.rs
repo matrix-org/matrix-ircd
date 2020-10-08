@@ -368,11 +368,11 @@ impl MappingStore {
         irc_server.create_user(nick, user_id);
     }
 
-    pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&String> {
+    pub fn channel_to_room_id(&self, channel: &str) -> Option<&String> {
         self.channel_to_room_id.get(channel)
     }
 
-    pub fn room_id_to_channel(&mut self, room_id: &str) -> Option<&String> {
+    pub fn room_id_to_channel(&self, room_id: &str) -> Option<&String> {
         self.room_id_to_channel.get(room_id)
     }
 
