@@ -226,6 +226,22 @@ impl<S: AsyncRead + AsyncWrite + 'static> IrcUserConnection<S> {
         self.conn.write_line(line);
     }
 
+    pub fn away(&mut self) {
+        self.conn.write_numeric(
+            Numeric::RplNowaway,
+            &self.nick,
+            "You are now away",
+        );
+    }
+
+    pub fn unaway(&mut self) {
+        self.conn.write_numeric(
+            Numeric::RplUnaway,
+            &self.nick,
+            "Welcome back",
+        );
+    }
+
     fn handle_who_channel_cmd(&mut self, channel: String) {
         let IrcUserConnection {
             ref mut server_model,
