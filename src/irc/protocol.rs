@@ -343,7 +343,7 @@ impl_rdp! {
         digit = _{ ['0' .. '9'] }
         space = _{ [" "]+ }
         params = _{ (space ~ param)* ~ ( space ~ [":"] ~ trailing_param )?  }
-        nospcrlfcl = _{ ['\x01'..'\x09'] | ['\x0B'..'\x0C'] | ['\x0E'..'\x1F'] | ['\x21'..'\x39'] | ['\x3B'..'\x7F'] | ['\u{0080}'..'\u{07FF}'] | ['\u{0800}'..'\u{FFFF}']  }
+        nospcrlfcl = _{ ['\x01'..'\x09'] | ['\x0B'..'\x0C'] | ['\x0E'..'\x1F'] | ['\x21'..'\x39'] | ['\x3B'..'\x7F'] | ['\u{0080}'..'\u{07FF}'] | ['\u{0800}'..'\u{FFFF}'] | ['\u{10000}'..'\u{1FFFF}']  }
         param = { nospcrlfcl ~ ( [":"] | nospcrlfcl )* }
         trailing_param = { ([":"] | [" "] | nospcrlfcl)* }
     }
