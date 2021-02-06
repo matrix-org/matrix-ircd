@@ -31,11 +31,18 @@ use std::boxed::Box;
 use std::collections::BTreeMap;
 use std::io;
 use std::pin::Pin;
+use std::convert::TryFrom;
 
 use serde_json::Value;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
+
+use ruma_client::Client;
+use ruma_client::api::r0 as api;
+use ruma_client::identifiers::{RoomId, UserId};
+use ruma_client::events;
+use api::sync::sync_events;
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -48,7 +55,7 @@ pub struct Bridge<IS: AsyncRead + AsyncWrite + Send + 'static> {
     closed: bool,
     mappings: MappingStore,
     is_first_sync: bool,
-    joining_map: BTreeMap<String, String>,
+    joining_map: BTreeMap<RoomId, String>,
 }
 
 impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
@@ -90,7 +97,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             ..
         } = bridge;
         let own_nick = irc_conn.nick.clone();
-        let own_user_id = matrix_client.get_user_id().into();
+        let own_user_id = matrix_client.get_user_id().to_string();
         mappings.insert_nick(irc_conn, own_nick, own_user_id);
 
         Ok(bridge)
@@ -102,11 +109,11 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         match line {
             IrcCommand::PrivMsg { channel, text } => {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
-                    info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
+                    info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_ref());
 
                     if self
                         .matrix_client
-                        .send_text_message(room_id, text)
+                        .send_text_message(room_id.clone(), text)
                         .await
                         .is_err()
                     {
@@ -119,8 +126,11 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             IrcCommand::Join { channel } => {
                 info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
 
+                // TODO this might need to use ::new() instead but that requires the rand feature
+                let room = RoomId::try_from(channel.clone()).unwrap();
+
                 let join_future =
-                    if let Ok(response) = self.matrix_client.join_room(channel.as_str()).await {
+                    if let Ok(response) = self.matrix_client.join_room(room).await {
                         response
                     } else {
                         // TODO: log this
@@ -129,7 +139,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
 
                 let room_id = join_future.room_id;
 
-                task_info!(self.ctx, "Joined channel"; "channel" => channel.clone(), "room_id" => room_id.clone());
+                task_info!(self.ctx, "Joined channel"; "channel" => channel.clone(), "room_id" => room_id.as_ref());
 
                 if let Some(mapped_channel) = self.mappings.room_id_to_channel(&room_id) {
                     if mapped_channel == &channel {
@@ -145,7 +155,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                             .await;
                     }
                 } else {
-                    task_trace!(self.ctx, "Waiting for room to come down sync"; "room_id" => room_id.clone());
+                    task_trace!(self.ctx, "Waiting for room to come down sync"; "room_id" => room_id.as_ref());
                     self.joining_map.insert(room_id, channel);
                 };
             }
@@ -156,7 +166,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    async fn handle_sync_response(&mut self, sync_response: SyncResponse) {
+    async fn handle_sync_response(&mut self, sync_response: sync_events::Response) {
         trace!(self.ctx.logger, "Received sync response"; "batch" => sync_response.next_batch);
 
         if self.is_first_sync {
@@ -176,13 +186,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    async fn handle_room_sync(&mut self, room_id: &str, sync: &JoinedRoomSyncResponse) {
+    async fn handle_room_sync(&mut self, room_id: &RoomId, sync: &sync_events::JoinedRoom) {
         let (channel, new) = if let Some(room) = self.matrix_client.get_room(room_id) {
             self.mappings
                 .create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)
                 .await
         } else {
-            warn!(self.ctx.logger, "Got room matrix doesn't know about"; "room_id" => room_id);
+            warn!(self.ctx.logger, "Got room matrix doesn't know about"; "room_id" => room_id.as_ref());
             return;
         };
 
@@ -199,21 +209,21 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                 let sender_nick = match self.mappings.get_nick_from_matrix(&ev.sender) {
                     Some(x) => x,
                     None => {
-                        warn!(self.ctx.logger, "Sender not in room"; "room" => room_id, "sender" => &ev.sender[..]);
+                        warn!(self.ctx.logger, "Sender not in room"; "room" => room_id.as_ref(), "sender" => &ev.sender[..]);
                         continue;
                     }
                 };
                 let body = match ev.content.get("body").and_then(Value::as_str) {
                     Some(x) => x,
                     None => {
-                        warn!(self.ctx.logger, "Message has no body"; "room" => room_id, "message" => format!("{:?}", ev));
+                        warn!(self.ctx.logger, "Message has no body"; "room" => room_id.as_ref(), "message" => format!("{:?}", ev));
                         continue;
                     }
                 };
                 let msgtype = match ev.content.get("msgtype").and_then(Value::as_str) {
                     Some(x) => x,
                     None => {
-                        warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id, "message" => format!("{:?}", ev));
+                        warn!(self.ctx.logger, "Message has no msgtype"; "room" => room_id.as_ref(), "message" => format!("{:?}", ev));
                         continue;
                     }
                 };
@@ -237,13 +247,13 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                                     .await
                             }
                             None => {
-                                warn!(self.ctx.logger, "Media message has no url"; "room" => room_id,
+                                warn!(self.ctx.logger, "Media message has no url"; "room" => room_id.as_ref(),
                                                                                           "message" => format!("{:?}", ev));
                             }
                         }
                     }
                     _ => {
-                        warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id, "msgtype" => msgtype);
+                        warn!(self.ctx.logger, "Unknown msgtype"; "room" => room_id.as_ref(), "msgtype" => msgtype);
                         self.irc_conn
                             .send_message(&channel, sender_nick, body)
                             .await;
@@ -308,8 +318,8 @@ quick_error! {
 /// Handles mapping various IRC and Matrix ID's onto each other.
 #[derive(Debug, Clone, Default)]
 struct MappingStore {
-    channel_to_room_id: BTreeMap<String, String>,
-    room_id_to_channel: BTreeMap<String, String>,
+    channel_to_room_id: BTreeMap<String, RoomId>,
+    room_id_to_channel: BTreeMap<RoomId, String>,
 
     matrix_uid_to_nick: BTreeMap<String, String>,
     nick_matrix_uid: BTreeMap<String, String>,
@@ -329,11 +339,11 @@ impl MappingStore {
         irc_server.create_user(nick.clone(), user_id.into());
     }
 
-    pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&String> {
+    pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&RoomId> {
         self.channel_to_room_id.get(channel)
     }
 
-    pub fn room_id_to_channel(&mut self, room_id: &str) -> Option<&String> {
+    pub fn room_id_to_channel(&mut self, room_id: &RoomId) -> Option<&String> {
         self.room_id_to_channel.get(room_id)
     }
 
@@ -386,9 +396,9 @@ impl MappingStore {
         }
 
         self.room_id_to_channel
-            .insert(room_id.into(), channel.clone());
+            .insert(room_id.clone(), channel.clone());
         self.channel_to_room_id
-            .insert(channel.clone(), room_id.into());
+            .insert(channel.clone(), room_id.clone());
 
         let members: Vec<_> = room
             .get_members()

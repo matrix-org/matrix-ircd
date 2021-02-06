@@ -13,19 +13,21 @@
 // limitations under the License.
 
 use crate::matrix::protocol::{Event, JoinedRoomSyncResponse};
+use ruma_client::api::r0::sync::sync_events;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ruma_client::identifiers::RoomId;
 use serde_json::Value;
 
 pub struct Room {
-    room_id: String,
+    room_id: RoomId,
     state: BTreeMap<String, BTreeMap<String, Event>>,
     members: BTreeMap<String, Member>,
 }
 
 impl Room {
-    pub fn from_sync(room_id: String, resp: &JoinedRoomSyncResponse) -> Room {
+    pub fn from_sync(room_id: RoomId, resp: &sync_events::JoinedRoom) -> Room {
         let mut state_map = BTreeMap::new();
 
         for ev in &resp.state.events {
@@ -60,7 +62,7 @@ impl Room {
         room
     }
 
-    pub fn update_from_sync(&mut self, resp: &JoinedRoomSyncResponse) {
+    pub fn update_from_sync(&mut self, resp: &sync_events::JoinedRoom) {
         let mut contained_member_event = false;
 
         for ev in &resp.state.events {
@@ -177,7 +179,7 @@ impl Room {
         &self.members
     }
 
-    pub fn get_room_id(&self) -> &str {
+    pub fn get_room_id(&self) -> &RoomId {
         &self.room_id
     }
 }

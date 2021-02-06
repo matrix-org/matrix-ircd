@@ -17,6 +17,7 @@
 //! It knows nothing about IRC.
 
 use futures::prelude::Stream;
+use futures::stream::TryStream;
 use futures::task::Poll;
 
 use std::boxed::Box;
@@ -25,7 +26,6 @@ use std::io;
 use std::pin::Pin;
 use std::task::Context;
 
-use url::percent_encoding::{percent_encode, PATH_SEGMENT_ENCODE_SET};
 use url::Url;
 
 use serde_json;
@@ -45,45 +45,65 @@ pub use self::models::{Member, Room};
 
 use crate::ConnectionContext;
 
+use ruma_client::Client;
+use ruma_client::api::r0 as api;
+use ruma_client::identifiers;
+use ruma_client::events;
+use api::sync::sync_events;
+type RumaClient = Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct TextMessage {
+    msgtype: String,
+    body: String,
+}
+impl TextMessage {
+    fn new(text: String) -> Self {
+        TextMessage {
+            msgtype: "m.text".to_string(),
+            body: text,
+        }
+    }
+    fn raw_json(self) -> Result<Box<serde_json::value::RawValue>, Error> {
+        let value = serde_json::value::to_raw_value(&self)?;
+        Ok(value)
+    }
+}
+
 /// A single Matrix session.
 ///
 /// A `MatrixClient` both send requests and outputs a Stream of `SyncResponse`'s. It also keeps track
 /// of vaious
 pub struct MatrixClient {
-    url: Url,
-    user_id: String,
-    access_token: String,
-    sync_client: Pin<Box<sync::MatrixSyncClient>>,
-    rooms: BTreeMap<String, Room>,
-    http_client: http::ClientWrapper,
+    user_id: identifiers::UserId,
+    client: RumaClient,
+    rooms: BTreeMap<identifiers::RoomId, Room>,
     ctx: ConnectionContext,
+    url: url::Url,
+    stream: Option<Pin<Box<dyn Stream<Item = Result<sync_events::Response, ruma_client::Error<ruma_client::api::Error>>> + Send >>>
 }
+
+unsafe impl Sync for MatrixClient {}
 
 impl MatrixClient {
     pub fn new(
-        http_client: http::ClientWrapper,
-        base_url: &Url,
-        user_id: String,
-        access_token: String,
+        client: RumaClient,
         ctx: ConnectionContext,
+        user_id: identifiers::UserId,
+        url: url::Url
     ) -> MatrixClient {
         MatrixClient {
-            url: base_url.clone(),
-            user_id,
-            access_token: access_token.clone(),
-            sync_client: Box::pin(sync::MatrixSyncClient::new(
-                base_url,
-                access_token,
-                ctx.clone(),
-            )),
+            client,
             rooms: BTreeMap::new(),
-            http_client,
             ctx,
+            user_id,
+            url,
+            stream: None
         }
     }
 
     /// The user ID associated with this session.
-    pub fn get_user_id(&self) -> &str {
+    pub fn get_user_id(&self) -> &identifiers::UserId {
         &self.user_id
     }
 
@@ -95,114 +115,50 @@ impl MatrixClient {
         ctx: ConnectionContext,
     ) -> Result<MatrixClient, Error> {
         let http_client = http::ClientWrapper::new();
+        let ruma_client = Client::https(base_url.clone(), None);
 
-        let login = protocol::LoginPasswordInput {
-            user,
-            password,
-            login_type: "m.login.password".to_string(),
-        };
-        let json_bytes = serde_json::to_vec(&login).expect("could not serialize login to json");
-        let body = json_bytes.into();
-
-        let request = hyper::Request::builder()
-            .method("POST")
-            .uri(
-                base_url
-                    .join("/_matrix/client/r0/login")
-                    .expect("could not join login path")
-                    .as_str()
-                    .parse::<hyper::Uri>()
-                    .unwrap(),
-            )
-            .body(body)
-            .expect("request could not be built");
-
-        let login = http_client.send_request(request).await?;
-
-        let status_code = login.status().as_u16();
-        if status_code == 401 || status_code == 403 {
-            return Err(JsonPostError::ErrorResponse(status_code)
-                .into_io_error()
-                .into());
-        }
-
-        let body_bytes = hyper::body::to_bytes(login.into_body()).await?;
-        let login_response: protocol::LoginResponse = serde_json::from_slice(&body_bytes)?;
+        let session = ruma_client.log_in(user, password, None, Some("matrix-ircd".to_string())).await?;
 
         let matrix_client = MatrixClient::new(
-            http_client,
-            &base_url,
-            login_response.user_id,
-            login_response.access_token,
+            ruma_client,
             ctx,
+            session.identification.unwrap().user_id,
+            base_url
         );
         Ok(matrix_client)
     }
 
     pub(crate) async fn send_text_message(
         &mut self,
-        room_id: &str,
+        room_id: identifiers::RoomId,
         body: String,
-    ) -> Result<protocol::RoomSendResponse, Error> {
-        let msg_id = thread_rng().gen::<u16>();
-        let mut url = self
-            .url
-            .join(&format!(
-                "/_matrix/client/r0/rooms/{}/send/m.room.message/mircd-{}",
-                room_id, msg_id
-            ))
-            .expect("Unable to construct a valid API url");
+    ) -> Result<api::message::create_message_event::Response, Error> {
+        let txn_id= thread_rng().gen::<u16>().to_string();
+        let event_type = events::EventType::RoomMessage;
+        let data = TextMessage::new(body).raw_json()?;
 
-        url.query_pairs_mut()
-            .clear()
-            .append_pair("access_token", &self.access_token);
+        let request = api::message::create_message_event::Request {
+            room_id,
+            event_type,
+            txn_id,
+            data
+        };
 
-        let body = serde_json::to_vec(&protocol::RoomSendInput {
-            body,
-            msgtype: "m.text".to_string(),
-        })?
-        .into();
+        let response = self.client.request(request).await?;
 
-        let request = hyper::Request::builder()
-            .method("PUT")
-            .uri(url.as_str().parse::<hyper::Uri>().unwrap())
-            .body(body)
-            .expect("request could not be built");
-
-        // TODO: improve this error handling
-        let response = self.http_client.send_request(request).await?;
-        let bytes = hyper::body::to_bytes(response.into_body()).await?;
-
-        let json_response = serde_json::from_slice(&bytes)?;
-        Ok(json_response)
+        Ok(response)
     }
 
-    pub async fn join_room(&mut self, room_id: &str) -> Result<protocol::RoomJoinResponse, Error> {
-        let roomid_encoded = percent_encode(room_id.as_bytes(), PATH_SEGMENT_ENCODE_SET);
-        let mut url = self
-            .url
-            .join(&format!("/_matrix/client/r0/join/{}", roomid_encoded))
-            .expect("Unable to construct a valid API url");
-
-        url.query_pairs_mut()
-            .clear()
-            .append_pair("access_token", &self.access_token);
-
-        let json_bytes = serde_json::to_vec(&protocol::RoomJoinInput {})?;
-
-        let request = hyper::Request::builder()
-            .method("POST")
-            .uri(url.as_str().parse::<hyper::Uri>().unwrap())
-            .body(json_bytes.into())
-            .expect("request could not be built");
-
-        let response = self.http_client.send_request(request).await?;
-        let bytes = hyper::body::to_bytes(response.into_body()).await?;
-        let json_response = serde_json::from_slice(&bytes)?;
-        Ok(json_response)
+    pub async fn join_room(&mut self, room_id: identifiers::RoomId) -> Result<api::membership::join_room_by_id::Response, Error> {
+        let request = api::membership::join_room_by_id::Request {
+            room_id,
+            third_party_signed: None
+        };
+        let response = self.client.request(request).await?;
+        Ok(response)
     }
 
-    pub fn get_room(&self, room_id: &str) -> Option<&Room> {
+    pub fn get_room(&self, room_id: &identifiers::RoomId) -> Option<&Room> {
         self.rooms.get(room_id)
     }
 
@@ -225,35 +181,52 @@ impl MatrixClient {
     fn poll_sync(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<Option<Result<protocol::SyncResponse, Error>>> {
-        let resp = match self.sync_client.as_mut().poll_next(cx)? {
-            Poll::Ready(x) => x,
-            Poll::Pending => return Poll::Pending,
-        };
+    ) -> Poll<Option<Result<sync_events::Response, Error>>> {
 
-        if let Some(mut sync_response) = resp {
-            for (room_id, sync) in &mut sync_response.rooms.join {
-                sync.timeline.events.retain(|ev| {
-                    !ev.unsigned
-                        .transaction_id
-                        .as_ref()
-                        .map(|txn_id| txn_id.starts_with("mircd-"))
-                        .unwrap_or(false)
-                });
+        if let Some(stream) = self.stream {
+            let resp = match stream.as_mut().poll_next(cx) {
+                Poll::Ready(x) => x,
+                Poll::Pending => return Poll::Pending
+            };
 
-                if let Some(room) = self.rooms.get_mut(room_id) {
-                    room.update_from_sync(sync);
-                    continue;
+            if let Some(mut sync_response) = resp {
+                if let Ok(sync_response) = sync_response {
+
+                    for (room_id, sync) in &mut sync_response.rooms.join {
+                        sync.timeline.events.retain(|ev| {
+                            !ev.deserialize().unwrap().unsigned
+                                .transaction_id
+                                .as_ref()
+                                .map(|txn_id| txn_id.starts_with("mircd-"))
+                                .unwrap_or(false)
+                        });
+
+                        if let Some(room) = self.rooms.get_mut(room_id) {
+                            room.update_from_sync(sync);
+                            continue;
+                        }
+
+                        // We can't put this in an else because of the mutable borrow in the if condition.
+                        self.rooms
+                            .insert(room_id.clone(), Room::from_sync(room_id.clone(), sync));
+                    }
+
+                    Poll::Ready(Some(Ok(sync_response)))
                 }
-
-                // We can't put this in an else because of the mutable borrow in the if condition.
-                self.rooms
-                    .insert(room_id.clone(), Room::from_sync(room_id.clone(), sync));
+                else {
+                    unreachable!()
+                }
+            } 
+                else {
+                Poll::Ready(None)
             }
-            Poll::Ready(Some(Ok(sync_response)))
-        } else {
-            Poll::Ready(None)
+
         }
+        else {
+            self.stream = Some(Box::pin(self.client.sync(None, None, api::sync::sync_events::SetPresence::Online, None)));
+            self.poll_sync(cx)
+        }
+
     }
 }
 
@@ -307,11 +280,17 @@ quick_error! {
             description("could not serialize / deserialize struct")
             display("Could not serialize request struct or deserialize response")
         }
+        RumaClient(err: ruma_client::api::Error) {
+            from()
+        }
+        RumaClientApi(err: ruma_client::Error<ruma_client::api::Error>) {
+            from()
+        }
     }
 }
 
 impl Stream for MatrixClient {
-    type Item = Result<protocol::SyncResponse, Error>;
+    type Item = Result<sync_events::Response, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         task_trace!(self.ctx, "Polled matrix client");
