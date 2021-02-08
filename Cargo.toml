@@ -37,7 +37,3 @@ trace_logging = [
     "slog/max_level_trace",
     "slog/release_max_level_warn",
 ]
-
-[dev-dependencies]
-# HTTP mocking
-mockito = "0.25.2"

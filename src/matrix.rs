@@ -141,7 +141,9 @@ impl MatrixClient {
         room_id: identifiers::RoomId,
         body: String,
     ) -> Result<api::message::create_message_event::Response, Error> {
-        let txn_id = thread_rng().gen::<u16>().to_string();
+        println!("send_text_message");
+
+        let txn_id = format!("mircd-{}", thread_rng().gen::<u16>());
         let event_type = events::EventType::RoomMessage;
         let data = TextMessage::new(body).raw_json()?;
 
@@ -154,15 +156,18 @@ impl MatrixClient {
 
         let response = self.client.request(request).await?;
 
+        println!("sent request");
+
         Ok(response)
     }
 
     pub async fn join_room(
         &mut self,
         room_id: identifiers::RoomId,
-    ) -> Result<api::membership::join_room_by_id::Response, Error> {
-        let request = api::membership::join_room_by_id::Request {
-            room_id,
+    ) -> Result<api::membership::join_room_by_id_or_alias::Response, Error> {
+        let request = api::membership::join_room_by_id_or_alias::Request {
+            room_id_or_alias: identifiers::RoomIdOrAliasId::from(room_id),
+            server_name: vec![self.url.to_string()],
             third_party_signed: None,
         };
         let response = self.client.request(request).await?;
@@ -300,73 +305,3 @@ impl Stream for MatrixClient {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::MatrixClient;
-    use mockito::{mock, Matcher, Matcher::UrlEncoded};
-
-    #[tokio::test]
-    async fn matrix_login() {
-        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
-        let username = "sample_username".to_string();
-        let password = "sample_password".to_string();
-
-        let mock_req = mock("POST", "/_matrix/client/r0/login")
-            .with_header("content-type", "application/json")
-            .with_status(200)
-            .create();
-
-        let ctx = crate::ConnectionContext::testing_context();
-
-        // run the future to completion. The future will error since invalid json is
-        // returned, but as long as the call is correct the error is outside the scope of this
-        // test. It is explicitly handled here in case the mock assert panics.
-        if let Err(e) = MatrixClient::login(base_url, username, password, ctx).await {
-            println! {"MatrixSyncClient returned an error: {:?}", e}
-        }
-
-        // give the executor some time to execute the http request on a thread pool
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        mock_req.assert();
-    }
-
-    #[tokio::test]
-    async fn send_text_message() {
-        let base_url = mockito::server_url().as_str().parse::<url::Url>().unwrap();
-        let user_id = "sample_user_id".to_string();
-        let token = "sample_token".to_string();
-        let room_id = "room_id";
-
-        let mock_req = mock(
-            "PUT",
-            Matcher::Regex(
-                r"^/_matrix/client/r0/rooms/(.+)/send/m.room.message/mircd-(\d+)$".to_string(),
-            ),
-        )
-        .match_query(UrlEncoded("access_token".to_string(), token.clone()))
-        .with_status(200)
-        .create();
-
-        let httpclient = crate::http::ClientWrapper::new();
-
-        let ctx = crate::ConnectionContext::testing_context();
-
-        let mut client = MatrixClient::new(httpclient, &base_url, user_id, token, ctx);
-
-        // run the future to completion. The future will error since invalid json is
-        // returned, but as long as the call is correct the error is outside the scope of this
-        // test. It is explicitly handled here in case the mock assert panics.
-        if let Err(e) = client
-            .send_text_message(room_id, "sample_body".to_string())
-            .await
-        {
-            println! {"MatrixSyncClient returned an error: {:?}", e}
-        }
-
-        // give the executor some time to execute the http request on a thread pool
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        mock_req.assert();
-    }
-}
