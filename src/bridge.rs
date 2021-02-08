@@ -29,17 +29,16 @@ use quick_error::quick_error;
 
 use std::boxed::Box;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::io;
 use std::pin::Pin;
-use std::convert::TryFrom;
 
 use serde_json::Value;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 
-use ruma_client::api::r0 as api;
-use ruma_client::identifiers::{RoomId, UserId};
+use ruma_client::identifiers::RoomId;
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -147,18 +146,20 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             IrcCommand::Join { channel } => {
                 info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
 
-                println!("now executing bridge/mod.rs handle_irc_cmd for channel: {}", channel);
+                println!(
+                    "now executing bridge/mod.rs handle_irc_cmd for channel: {}",
+                    channel
+                );
 
                 // TODO this might need to use ::new() instead but that requires the rand feature
                 let room = RoomId::try_from(channel.clone()).unwrap();
 
-                let join_future =
-                    if let Ok(response) = self.matrix_client.join_room(room).await {
-                        response
-                    } else {
-                        // TODO: log this
-                        return;
-                    };
+                let join_future = if let Ok(response) = self.matrix_client.join_room(room).await {
+                    response
+                } else {
+                    // TODO: log this
+                    return;
+                };
 
                 let room_id = join_future.room_id;
 
@@ -200,7 +201,6 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
 
         for (room_id, sync) in &sync_response.rooms.join {
-
             self.handle_room_sync(room_id, &sync).await;
         }
 

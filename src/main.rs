@@ -47,7 +47,6 @@ lazy_static::lazy_static! {
 #[macro_use]
 pub mod macros;
 pub mod bridge;
-pub mod http;
 pub mod irc;
 pub mod matrix;
 pub mod stream_fold;
@@ -163,7 +162,6 @@ async fn main() {
 
     // This is the main loop where we accept incoming *TCP* connections.
     while let Some(Ok(tcp_stream)) = socket.next().await {
-
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
             debug!(log, "{}", format!("Got TCP stream with address: {}", addr));
             addr
@@ -219,9 +217,6 @@ async fn main() {
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
-            //
-            // These are spawn_local due to it not requiring spawn_fut to be Send, but it could
-            // possibly be `spawn` in the future after changing trait bounds.
             tokio::spawn(spawn_fut);
         } else {
             debug!(ctx.logger.as_ref(), "Using non-tls connection");

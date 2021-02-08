@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crate::matrix::protocol::{Event, JoinedRoomSyncResponse};
-use ruma_client::api::r0::sync::sync_events;
 
 use std::collections::{BTreeMap, BTreeSet};
 

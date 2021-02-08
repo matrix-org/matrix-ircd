@@ -29,25 +29,23 @@ use url::Url;
 
 use rand::{thread_rng, Rng};
 
-use crate::http;
 use regex::Regex;
 
 use quick_error::quick_error;
 
 mod models;
 pub mod protocol;
-mod sync;
 
 pub use self::models::{Member, Room};
 use protocol::SyncResponse;
 
 use crate::ConnectionContext;
 
-use ruma_client::Client;
-use ruma_client::api::r0 as api;
-use ruma_client::identifiers;
-use ruma_client::events;
 use api::sync::sync_events;
+use ruma_client::api::r0 as api;
+use ruma_client::events;
+use ruma_client::identifiers;
+use ruma_client::Client;
 type RumaClient = Client<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -78,7 +76,18 @@ pub struct MatrixClient {
     rooms: BTreeMap<identifiers::RoomId, Room>,
     ctx: ConnectionContext,
     url: url::Url,
-    stream: Option<Pin<Box<dyn Stream<Item = Result<sync_events::Response, ruma_client::Error<ruma_client::api::Error>>> + Send >>>
+    stream: Option<
+        Pin<
+            Box<
+                dyn Stream<
+                        Item = Result<
+                            sync_events::Response,
+                            ruma_client::Error<ruma_client::api::Error>,
+                        >,
+                    > + Send,
+            >,
+        >,
+    >,
 }
 
 unsafe impl Sync for MatrixClient {}
@@ -88,7 +97,7 @@ impl MatrixClient {
         client: RumaClient,
         ctx: ConnectionContext,
         user_id: identifiers::UserId,
-        url: url::Url
+        url: url::Url,
     ) -> MatrixClient {
         MatrixClient {
             client,
@@ -96,7 +105,7 @@ impl MatrixClient {
             ctx,
             user_id,
             url,
-            stream: None
+            stream: None,
         }
     }
 
@@ -112,16 +121,17 @@ impl MatrixClient {
         password: String,
         ctx: ConnectionContext,
     ) -> Result<MatrixClient, Error> {
-        let http_client = http::ClientWrapper::new();
         let ruma_client = Client::https(base_url.clone(), None);
 
-        let session = ruma_client.log_in(user, password, None, Some("matrix-ircd".to_string())).await?;
+        let session = ruma_client
+            .log_in(user, password, None, Some("matrix-ircd".to_string()))
+            .await?;
 
         let matrix_client = MatrixClient::new(
             ruma_client,
             ctx,
             session.identification.unwrap().user_id,
-            base_url
+            base_url,
         );
         Ok(matrix_client)
     }
@@ -131,7 +141,7 @@ impl MatrixClient {
         room_id: identifiers::RoomId,
         body: String,
     ) -> Result<api::message::create_message_event::Response, Error> {
-        let txn_id= thread_rng().gen::<u16>().to_string();
+        let txn_id = thread_rng().gen::<u16>().to_string();
         let event_type = events::EventType::RoomMessage;
         let data = TextMessage::new(body).raw_json()?;
 
@@ -139,7 +149,7 @@ impl MatrixClient {
             room_id,
             event_type,
             txn_id,
-            data
+            data,
         };
 
         let response = self.client.request(request).await?;
@@ -147,10 +157,13 @@ impl MatrixClient {
         Ok(response)
     }
 
-    pub async fn join_room(&mut self, room_id: identifiers::RoomId) -> Result<api::membership::join_room_by_id::Response, Error> {
+    pub async fn join_room(
+        &mut self,
+        room_id: identifiers::RoomId,
+    ) -> Result<api::membership::join_room_by_id::Response, Error> {
         let request = api::membership::join_room_by_id::Request {
             room_id,
-            third_party_signed: None
+            third_party_signed: None,
         };
         let response = self.client.request(request).await?;
         Ok(response)
@@ -180,16 +193,14 @@ impl MatrixClient {
         mut self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Option<Result<SyncResponse, Error>>> {
-
         if let Some(stream) = &mut self.stream {
             let resp = match stream.as_mut().poll_next(cx) {
                 Poll::Ready(x) => x,
-                Poll::Pending => return Poll::Pending
+                Poll::Pending => return Poll::Pending,
             };
 
             if let Some(sync_response) = resp {
                 if let Ok(sync_response) = sync_response {
-
                     // map the serde sync_events::SyncResponse to protocol::SyncResponse so
                     // that we can use the existing fields.
                     let mut sync_response = protocol::SyncResponse::from_ruma(sync_response)?;
@@ -204,7 +215,6 @@ impl MatrixClient {
                         });
 
                         if let Some(room) = self.rooms.get_mut(room_id) {
-
                             room.update_from_sync(sync);
                             continue;
                         }
@@ -215,21 +225,21 @@ impl MatrixClient {
                     }
 
                     Poll::Ready(Some(Ok(sync_response)))
-                }
-                else {
+                } else {
                     unreachable!()
                 }
-            } 
-                else {
+            } else {
                 Poll::Ready(None)
             }
-
-        }
-        else {
-            self.stream = Some(Box::pin(self.client.sync(None, None, api::sync::sync_events::SetPresence::Online, None)));
+        } else {
+            self.stream = Some(Box::pin(self.client.sync(
+                None,
+                None,
+                api::sync::sync_events::SetPresence::Online,
+                None,
+            )));
             self.poll_sync(cx)
         }
-
     }
 }
 
@@ -245,17 +255,6 @@ quick_error! {
         ErrorResponse(code: u16) {
             description("received non 200 response")
             display("Received response: {}", code)
-        }
-    }
-}
-
-impl JsonPostError {
-    pub fn into_io_error(self) -> io::Error {
-        match self {
-            JsonPostError::Io(err) => err,
-            JsonPostError::ErrorResponse(code) => {
-                io::Error::new(io::ErrorKind::Other, format!("Received {} response", code))
-            }
         }
     }
 }
