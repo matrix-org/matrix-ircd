@@ -163,10 +163,10 @@ impl MatrixClient {
 
     pub async fn join_room(
         &mut self,
-        room_id: identifiers::RoomId,
+        room_id_or_alias: identifiers::RoomIdOrAliasId,
     ) -> Result<api::membership::join_room_by_id_or_alias::Response, Error> {
         let request = api::membership::join_room_by_id_or_alias::Request {
-            room_id_or_alias: identifiers::RoomIdOrAliasId::from(room_id),
+            room_id_or_alias,
             server_name: vec![self.url.to_string()],
             third_party_signed: None,
         };

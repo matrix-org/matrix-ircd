@@ -38,7 +38,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 
-use ruma_client::identifiers::RoomId;
+use ruma_client::identifiers::{RoomId, RoomIdOrAliasId};
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -151,8 +151,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                     channel
                 );
 
-                // TODO this might need to use ::new() instead but that requires the rand feature
-                let room = RoomId::try_from(channel.clone()).unwrap();
+                let room = RoomIdOrAliasId::try_from(channel.clone()).unwrap();
 
                 let join_future = if let Ok(response) = self.matrix_client.join_room(room).await {
                     response
