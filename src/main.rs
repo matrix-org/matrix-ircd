@@ -24,11 +24,9 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::task::Context;
 
 use clap::{App, Arg};
 
-use futures::future;
 use futures::stream::StreamExt;
 
 use slog::Drain;
@@ -60,6 +58,7 @@ pub struct ConnectionContext {
     logger: Arc<slog::Logger>,
     peer_addr: SocketAddr,
 }
+
 impl ConnectionContext {
     /// Method for easily constructing a context in a test. This constructor should not be used
     /// outside of a testing function
@@ -166,6 +165,7 @@ async fn main() {
     while let Some(Ok(tcp_stream)) = socket.next().await {
 
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
+            debug!(log, "{}", format!("Got TCP stream with address: {}", addr));
             addr
         } else {
             debug!(
@@ -192,9 +192,10 @@ async fn main() {
         trace!(log, "Checking TLS acceptor");
 
         if let Some(acceptor) = tls_acceptor.clone() {
-            trace!(log, "Using TLS connection");
+            debug!(ctx.logger.as_ref(), "Using TLS acceptor");
+
             // Do the TLS handshake and then set up the bridge
-            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
+            let spawn_fut = async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
 
                 let tls_socket = acceptor
@@ -211,22 +212,10 @@ async fn main() {
                         .await
                         .unwrap();
 
-                // TODO: I belive this is what taskedfutures did (except it was previously spawned
-                // off inside Bridge::create). I will come back and make sure this is correct
-                // later.
-                loop {
-                    if let Err(e) = bridge.poll_irc().await {
-                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                    if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                }
+                bridge.run(&ctx).await;
 
                 task_info!(ctx, "Finished");
-            });
+            };
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
@@ -235,26 +224,19 @@ async fn main() {
             // possibly be `spawn` in the future after changing trait bounds.
             tokio::spawn(spawn_fut);
         } else {
-            trace!(log, "Using non-TLS connection");
+            debug!(ctx.logger.as_ref(), "Using non-tls connection");
+
             // Same as above except with less TLS.
-            let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
+            let spawn_fut = async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
 
                 let mut bridge =
                     bridge::Bridge::create(cloned_url, tcp_stream, irc_server_name, ctx.clone())
                         .await
                         .unwrap();
-                loop {
-                    if let Err(e) = bridge.poll_irc().await {
-                        task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                    if let Err(e) = bridge.poll_matrix().await {
-                        task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
-                        break;
-                    }
-                }
-            });
+
+                bridge.run(&ctx).await;
+            };
 
             tokio::spawn(spawn_fut);
             trace!(log, "Finished spawning the bridge");

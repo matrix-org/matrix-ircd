@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 use ruma_client::api::r0::sync::sync_events;
 use ruma_client::identifiers::RoomId;
@@ -114,7 +113,6 @@ pub struct RoomSendResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn sync_response() {

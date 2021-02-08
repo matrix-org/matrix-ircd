@@ -61,8 +61,8 @@ impl ServerModel {
         self.users.insert(
             nick.clone(),
             User {
-                nick: nick.clone(),
-                user: user.into(),
+                nick,
+                user,
                 mask: "/matrix/user".into(),
                 channels: BTreeSet::new(),
             },

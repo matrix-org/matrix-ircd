@@ -66,11 +66,27 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         irc_server_name: String,
         ctx: ConnectionContext,
     ) -> Result<Bridge<IS>, Error> {
-        debug!(ctx.logger, "Creating bridge");
-        println!("creating bridge");
+        debug!(ctx.logger.as_ref(), "Starting irc connection");
 
         // make individual connections
-        let irc_conn = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await?;
+        let irc_conn =
+            match IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    warn!(
+                        ctx.logger.as_ref(),
+                        "IrcUserConnection could not be created. Error: {}",
+                        err.to_string()
+                    );
+                    return Err(Error::from(err));
+                }
+            };
+
+        debug!(
+            ctx.logger.as_ref(),
+            "successfully created the bridge irc connection"
+        );
+
         let matrix_client = MatrixClient::login(
             base_url,
             irc_conn.user.clone(),
@@ -78,6 +94,11 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             ctx.clone(),
         )
         .await?;
+
+        debug!(
+            ctx.logger.as_ref(),
+            "successfully constructed a new matrix client"
+        );
 
         // setup connections to intermediate bridge
         let mut bridge = Bridge {
@@ -136,7 +157,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
                         response
                     } else {
                         // TODO: log this
-                        return ();
+                        return;
                     };
 
                 let room_id = join_future.room_id;
@@ -200,7 +221,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         };
 
         if let Some(attempt_channel) = self.joining_map.remove(room_id) {
-            if &attempt_channel != &channel {
+            if attempt_channel != channel {
                 self.irc_conn
                     .write_redirect_join(&attempt_channel, &channel)
                     .await;
@@ -270,7 +291,22 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    pub async fn poll_irc(&mut self) -> Result<(), io::Error> {
+    pub async fn run(&mut self, ctx: &ConnectionContext) {
+        loop {
+            debug!(ctx.logger.as_ref(), "Polling bridge and matrix for changes");
+
+            if let Err(e) = self.poll_irc().await {
+                task_warn!(ctx, "Encounted error while polling IRC connection"; "error" => format!{"{}", e});
+                break;
+            }
+            if let Err(e) = self.poll_matrix().await {
+                task_warn!(ctx, "Encounted error while polling matrix connection"; "error" => format!{"{}", e});
+                break;
+            }
+        }
+    }
+
+    async fn poll_irc(&mut self) -> Result<(), io::Error> {
         // Don't handle more IRC messages until we have done an initial sync.
         // This is safe as we will get woken up by the sync.
         if self.is_first_sync {
@@ -292,7 +328,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    pub async fn poll_matrix(&mut self) -> Result<(), Error> {
+    async fn poll_matrix(&mut self) -> Result<(), Error> {
         while let Some(response) = self.matrix_client.as_mut().next().await {
             let response = response?;
             self.handle_sync_response(response).await;
@@ -339,7 +375,7 @@ impl MappingStore {
             .insert(user_id.clone(), nick.clone());
         self.nick_matrix_uid.insert(nick.clone(), user_id.clone());
 
-        irc_server.create_user(nick.clone(), user_id.into());
+        irc_server.create_user(nick, user_id);
     }
 
     pub fn channel_to_room_id(&mut self, channel: &str) -> Option<&RoomId> {
