@@ -17,15 +17,27 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
+use ruma_client::api::r0::sync::sync_events;
+use ruma_client::identifiers::RoomId;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncResponse {
     pub next_batch: String,
     pub rooms: RoomsSyncResponse,
 }
 
+impl SyncResponse {
+    pub fn from_ruma(ruma_response: sync_events::Response) -> Result<Self, serde_json::Error> {
+        let next_batch = ruma_response.next_batch;
+        let rooms_json: String = serde_json::to_string(&ruma_response.rooms)?;
+        let rooms = serde_json::from_str(&rooms_json)?;
+        Ok(Self { next_batch, rooms })
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RoomsSyncResponse {
-    pub join: BTreeMap<String, JoinedRoomSyncResponse>,
+    pub join: BTreeMap<RoomId, JoinedRoomSyncResponse>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

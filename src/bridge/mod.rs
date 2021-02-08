@@ -38,11 +38,8 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 
-use ruma_client::Client;
 use ruma_client::api::r0 as api;
 use ruma_client::identifiers::{RoomId, UserId};
-use ruma_client::events;
-use api::sync::sync_events;
 
 /// Bridges a single IRC connection with a matrix session.
 ///
@@ -69,6 +66,9 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         irc_server_name: String,
         ctx: ConnectionContext,
     ) -> Result<Bridge<IS>, Error> {
+        debug!(ctx.logger, "Creating bridge");
+        println!("creating bridge");
+
         // make individual connections
         let irc_conn = IrcUserConnection::await_login(irc_server_name, stream, ctx.clone()).await?;
         let matrix_client = MatrixClient::login(
@@ -126,6 +126,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
             IrcCommand::Join { channel } => {
                 info!(self.ctx.logger, "Joining channel"; "channel" => channel.clone());
 
+                println!("now executing bridge/mod.rs handle_irc_cmd for channel: {}", channel);
+
                 // TODO this might need to use ::new() instead but that requires the rand feature
                 let room = RoomId::try_from(channel.clone()).unwrap();
 
@@ -166,7 +168,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    async fn handle_sync_response(&mut self, sync_response: sync_events::Response) {
+    async fn handle_sync_response(&mut self, sync_response: SyncResponse) {
         trace!(self.ctx.logger, "Received sync response"; "batch" => sync_response.next_batch);
 
         if self.is_first_sync {
@@ -177,7 +179,8 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
 
         for (room_id, sync) in &sync_response.rooms.join {
-            self.handle_room_sync(room_id, sync).await;
+
+            self.handle_room_sync(room_id, &sync).await;
         }
 
         if self.is_first_sync {
@@ -186,7 +189,7 @@ impl<IS: AsyncRead + AsyncWrite + 'static + Send> Bridge<IS> {
         }
     }
 
-    async fn handle_room_sync(&mut self, room_id: &RoomId, sync: &sync_events::JoinedRoom) {
+    async fn handle_room_sync(&mut self, room_id: &RoomId, sync: &JoinedRoomSyncResponse) {
         let (channel, new) = if let Some(room) = self.matrix_client.get_room(room_id) {
             self.mappings
                 .create_or_get_channel_name_from_matrix(&mut self.irc_conn, room)

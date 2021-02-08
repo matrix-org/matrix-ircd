@@ -27,7 +27,7 @@ pub struct Room {
 }
 
 impl Room {
-    pub fn from_sync(room_id: RoomId, resp: &sync_events::JoinedRoom) -> Room {
+    pub fn from_sync(room_id: RoomId, resp: &JoinedRoomSyncResponse) -> Room {
         let mut state_map = BTreeMap::new();
 
         for ev in &resp.state.events {
@@ -62,7 +62,7 @@ impl Room {
         room
     }
 
-    pub fn update_from_sync(&mut self, resp: &sync_events::JoinedRoom) {
+    pub fn update_from_sync(&mut self, resp: &JoinedRoomSyncResponse) {
         let mut contained_member_event = false;
 
         for ev in &resp.state.events {

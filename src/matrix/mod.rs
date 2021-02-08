@@ -17,7 +17,6 @@
 //! It knows nothing about IRC.
 
 use futures::prelude::Stream;
-use futures::stream::TryStream;
 use futures::task::Poll;
 
 use std::boxed::Box;
@@ -42,6 +41,7 @@ pub mod protocol;
 mod sync;
 
 pub use self::models::{Member, Room};
+use protocol::SyncResponse;
 
 use crate::ConnectionContext;
 
@@ -181,20 +181,24 @@ impl MatrixClient {
     fn poll_sync(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<Option<Result<sync_events::Response, Error>>> {
+    ) -> Poll<Option<Result<SyncResponse, Error>>> {
 
-        if let Some(stream) = self.stream {
+        if let Some(stream) = &mut self.stream {
             let resp = match stream.as_mut().poll_next(cx) {
                 Poll::Ready(x) => x,
                 Poll::Pending => return Poll::Pending
             };
 
-            if let Some(mut sync_response) = resp {
+            if let Some(sync_response) = resp {
                 if let Ok(sync_response) = sync_response {
+
+                    // map the serde sync_events::SyncResponse to protocol::SyncResponse so
+                    // that we can use the existing fields.
+                    let mut sync_response = protocol::SyncResponse::from_ruma(sync_response)?;
 
                     for (room_id, sync) in &mut sync_response.rooms.join {
                         sync.timeline.events.retain(|ev| {
-                            !ev.deserialize().unwrap().unsigned
+                            !ev.unsigned
                                 .transaction_id
                                 .as_ref()
                                 .map(|txn_id| txn_id.starts_with("mircd-"))
@@ -202,6 +206,7 @@ impl MatrixClient {
                         });
 
                         if let Some(room) = self.rooms.get_mut(room_id) {
+
                             room.update_from_sync(sync);
                             continue;
                         }
@@ -290,7 +295,7 @@ quick_error! {
 }
 
 impl Stream for MatrixClient {
-    type Item = Result<sync_events::Response, Error>;
+    type Item = Result<SyncResponse, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         task_trace!(self.ctx, "Polled matrix client");

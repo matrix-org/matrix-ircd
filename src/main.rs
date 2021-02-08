@@ -164,6 +164,7 @@ async fn main() {
 
     // This is the main loop where we accept incoming *TCP* connections.
     while let Some(Ok(tcp_stream)) = socket.next().await {
+
         let addr = if let Ok(addr) = tcp_stream.peer_addr() {
             addr
         } else {
@@ -188,7 +189,10 @@ async fn main() {
         // two levels of closures (understandably)
         let cloned_url = matrix_url.clone();
 
+        trace!(log, "Checking TLS acceptor");
+
         if let Some(acceptor) = tls_acceptor.clone() {
+            trace!(log, "Using TLS connection");
             // Do the TLS handshake and then set up the bridge
             let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
@@ -231,6 +235,7 @@ async fn main() {
             // possibly be `spawn` in the future after changing trait bounds.
             tokio::spawn(spawn_fut);
         } else {
+            trace!(log, "Using non-TLS connection");
             // Same as above except with less TLS.
             let spawn_fut = future::lazy(move |_cx: &mut Context| async move {
                 debug!(ctx.logger.as_ref(), "Accepted connection");
@@ -252,6 +257,7 @@ async fn main() {
             });
 
             tokio::spawn(spawn_fut);
+            trace!(log, "Finished spawning the bridge");
         };
     }
 }
