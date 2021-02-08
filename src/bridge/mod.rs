@@ -52,6 +52,17 @@ pub struct Bridge<IS: AsyncRead + AsyncWrite + 'static> {
     joining_map: BTreeMap<String, String>,
 }
 
+fn handle_privmsg_action(text: String) -> (&'static str, String) {
+    // Example: '\x01ACTION foo\x01'.
+    let emote_content = text
+        .strip_prefix("\x01ACTION")
+        .and_then(|noprefix| noprefix.strip_suffix("\x01"));
+    match emote_content {
+        Some(value) => ("m.emote", value.into()),
+        None => ("m.text", text),
+    }
+}
+
 impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
     /// Given a new TCP connection wait until the IRC side logs in, and then login to the Matrix
     /// HS with the given user name and password.
@@ -118,9 +129,10 @@ impl<IS: AsyncRead + AsyncWrite + 'static> Bridge<IS> {
             IrcCommand::PrivMsg { channel, text } => {
                 if let Some(room_id) = self.mappings.channel_to_room_id(&channel) {
                     info!(self.ctx.logger, "Got msg"; "channel" => channel.as_str(), "room_id" => room_id.as_str());
+                    let (msgtype, body) = handle_privmsg_action(text);
                     self.handle.spawn(
                         self.matrix_client
-                            .send_text_message(room_id, text)
+                            .send_text_message(room_id, body, msgtype.to_string())
                             .map(|_| ())
                             .map_err(move |_| task_warn!("Failed to send")),
                     );
