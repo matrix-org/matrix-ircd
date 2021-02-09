@@ -138,6 +138,7 @@ impl MatrixClient {
         &mut self,
         room_id: &str,
         body: String,
+        msgtype: String,
     ) -> Box<dyn Future<Item = protocol::RoomSendResponse, Error = io::Error>> {
         let msg_id = thread_rng().gen::<u16>();
         let mut url = self
@@ -155,10 +156,7 @@ impl MatrixClient {
             "PUT",
             &mut self.http_stream,
             &url,
-            &protocol::RoomSendInput {
-                body,
-                msgtype: "m.text".into(),
-            },
+            &protocol::RoomSendInput { body, msgtype },
         )
         .map_err(JsonPostError::into_io_error);
 
@@ -381,7 +379,11 @@ mod tests {
         // run the future to completion. The future will error since invalid json is
         // returned, but as long as the call is correct the error is outside the scope of this
         // test. It is explicitly handled here in case the mock assert panics.
-        if let Err(e) = core.run(client.send_text_message(room_id, "sample_body".to_string())) {
+        if let Err(e) = core.run(client.send_text_message(
+            room_id,
+            "sample_body".to_string(),
+            "m.text".to_string(),
+        )) {
             println!("MatrixSyncClient returned an error: {:?}", e)
         }
 
