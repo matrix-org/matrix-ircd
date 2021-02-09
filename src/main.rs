@@ -47,7 +47,6 @@ lazy_static::lazy_static! {
 #[macro_use]
 pub mod macros;
 pub mod bridge;
-pub mod http;
 pub mod irc;
 pub mod matrix;
 pub mod stream_fold;
@@ -188,6 +187,8 @@ async fn main() {
         // two levels of closures (understandably)
         let cloned_url = matrix_url.clone();
 
+        trace!(log, "Checking TLS acceptor");
+
         if let Some(acceptor) = tls_acceptor.clone() {
             debug!(ctx.logger.as_ref(), "Using TLS acceptor");
 
@@ -216,9 +217,6 @@ async fn main() {
 
             // We spawn the future off, otherwise we'd block the stream of incoming connections.
             // This is what causes the future to be in its own chain.
-            //
-            // These are spawn_local due to it not requiring spawn_fut to be Send, but it could
-            // possibly be `spawn` in the future after changing trait bounds.
             tokio::spawn(spawn_fut);
         } else {
             debug!(ctx.logger.as_ref(), "Using non-tls connection");
@@ -236,6 +234,7 @@ async fn main() {
             };
 
             tokio::spawn(spawn_fut);
+            trace!(log, "Finished spawning the bridge");
         };
     }
 }
