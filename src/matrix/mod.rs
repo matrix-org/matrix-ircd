@@ -254,8 +254,8 @@ fn do_json_post<I: Serialize, O: DeserializeOwned + 'static>(
                 return Err(JsonPostError::ErrorRepsonse(resp.code));
             }
 
-            serde_json::from_slice(&resp.data).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "invalid json response").into()
+            serde_json::from_slice(&resp.data).map_err(|e| {
+                io::Error::new(io::ErrorKind::InvalidData, format!("invalid json response: {}", e)).into()
             })
         });
 
