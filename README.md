@@ -1,5 +1,12 @@
 # Matrix IRCd
 
+## Deprecation
+
+This project has been in a very hard to maintain state for a long time.
+A clean rewrite will be easier, so matrix-ircd will not receive further updates.
+
+## General
+
 [![Build Status](https://travis-ci.org/matrix-org/matrix-ircd.svg?branch=master)](https://travis-ci.org/matrix-org/matrix-ircd)
 
 An IRCd implementation backed by Matrix. Inspired by [PTO](https://github.com/tdfischer/pto)!
