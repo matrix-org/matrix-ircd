@@ -4,6 +4,7 @@
 
 This project has been in a very hard to maintain state for a long time.
 A clean rewrite will be easier, so matrix-ircd will not receive further updates.
+See [matrix2051](https://github.com/progval/matrix2051) or [matrirc](https://github.com/martinetd/matrirc) for alternatives.
 
 ## General
 
